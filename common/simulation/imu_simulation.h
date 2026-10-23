@@ -1,26 +1,18 @@
 // Copyright 2022 MapMind
 // SPDX-License-Identifier: GPL-2.0-only
 
-#ifndef IKFOM_COMMON_UTILS_H_
-#define IKFOM_COMMON_UTILS_H_
+#ifndef COMMON_SIMULATION_IMU_SIMULATION_H_
+#define COMMON_SIMULATION_IMU_SIMULATION_H_
 
 #include <optional>
-#include <ostream>
 #include <vector>
 
-#include "common/sensor/imu_data.h"
-#include "common/sensor/imu_intrinsics.h"
-#include "ikfom/toolkit/esekfom/esekfom.hpp"
+#include <Eigen/Core>
 
+#include "common/sensor/imu_data.h"
 #include "sophus/se3.hpp"
 
-template <typename Scalar>
-std::ostream& operator<<(std::ostream& os, const Sophus::SE3<Scalar>& se3) {
-  return os << "{ t: [" << se3.translation().transpose() << "], q: ["
-            << se3.so3().unit_quaternion().coeffs().transpose() << "] }";
-}
-
-namespace mapmind::ikfom::utils {
+namespace mapmind::simulation {
 
 struct ImuSimulation {
   Eigen::Vector3d bias_gyr;
@@ -41,6 +33,6 @@ ImuSimulation SimulateImuData(double bias_acc = 1e-3, double bias_gyr = 1e-3,
                               double duration_second = 30, int imu_fps = 100,
                               std::optional<Eigen::Vector3d> gravity = std::nullopt);
 
-}  // namespace mapmind::ikfom::utils
+}  // namespace mapmind::simulation
 
-#endif  // IKFOM_COMMON_UTILS_H_
+#endif  // COMMON_SIMULATION_IMU_SIMULATION_H_

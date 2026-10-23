@@ -6,6 +6,7 @@
 #include <algorithm>
 
 #include <gtest/gtest.h>
+#include "common/simulation/imu_simulation.h"
 
 namespace mapmind::ikfom::ins {
 
@@ -16,8 +17,8 @@ using Filter = esekfom::esekf<StateIkfom, ImuNoiseIkfom::DOF, ImuIkfom>;
 TEST(IkfLio, TracksSimulatedTrajectoryWithPoseUpdates) {
   constexpr int kImuFps = 100;
   constexpr int kPoseUpdateEvery = 10;
-  const utils::ImuSimulation simulation =
-      utils::SimulateImuData(0.0, 0.0, 10.0, kImuFps, Eigen::Vector3d(0, 0, -9.8099));
+  const simulation::ImuSimulation simulation =
+      simulation::SimulateImuData(0.0, 0.0, 10.0, kImuFps, Eigen::Vector3d(0, 0, -9.8099));
 
   Filter filter;
   double limit[StateIkfom::DOF];

@@ -4,9 +4,17 @@
 #ifndef COMMON_MATH_SOPHUS_UTILS_H_
 #define COMMON_MATH_SOPHUS_UTILS_H_
 
+#include <ostream>
+
 #include <Eigen/Core>
 
 #include "sophus/se3.hpp"
+
+template <typename Scalar>
+std::ostream& operator<<(std::ostream& os, const Sophus::SE3<Scalar>& se3) {
+  return os << "{ t: [" << se3.translation().transpose() << "], q: ["
+            << se3.so3().unit_quaternion().coeffs().transpose() << "] }";
+}
 
 namespace mapmind::math::sophus {
 

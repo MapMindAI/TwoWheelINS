@@ -1,12 +1,12 @@
 // Copyright 2022 MapMind
 // SPDX-License-Identifier: GPL-2.0-only
 
-#include "ikfom/common/covariance_transformation.h"
+#include "common/math/covariance.h"
 
 #include <gtest/gtest.h>
 #include "common/math/covariance_test_utils.h"
 
-namespace mapmind::ikfom {
+namespace mapmind::math {
 
 inline Eigen::Matrix<double, 6, 6> RandomCovariance(double level) {
   Eigen::Matrix<double, 6, 6> matrix_tmp = level * Eigen::Matrix<double, 6, 6>::Random();
@@ -222,4 +222,4 @@ TEST(CovarianceTransformation, DelayedGlobalLocalization) {
   EXPECT_NEAR(diff_mat.norm() / covariance_sim.norm(), 0.0, 0.01);
 }
 
-}  // namespace mapmind::ikfom
+}  // namespace mapmind::math

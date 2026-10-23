@@ -12,9 +12,8 @@ is meant to be ported to an embedded target, so new filter code is written in C 
 ```
 ├── ikfom/            # iterated Kalman filter on manifolds (C++ reference)
 │   ├── toolkit/      # MTK + esekfom (header-only), adapted from IKFoM; see its README for licensing
-│   ├── common/       # IMU simulation, pose covariance transformations
 │   └── backend/      # ikf_ins: IMU/GPS state (pos, rot, vel, biases, gravity) and measurement models
-├── common/           # shared helpers: so3/se3 Jacobians (math/), IMU data types (sensor/)
+├── common/           # shared helpers: so3/se3 Jacobians and pose covariance transformations (math/), IMU data types (sensor/), IMU simulation (simulation/)
 ├── toolchain/        # aarch64 platform + cross-compile cc_toolchain
 ├── .github/workflows # CI: bazel test //...
 ├── MODULE.bazel      # external deps (Bazel Central Registry)
