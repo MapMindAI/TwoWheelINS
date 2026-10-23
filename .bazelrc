@@ -1,0 +1,46 @@
+# +------------------------------------------------------------+
+# | Startup Options                                            |
+# +------------------------------------------------------------+
+startup --batch_cpu_scheduling
+startup --host_jvm_args=-XX:-UseParallelGC
+
+# +------------------------------------------------------------+
+# | Build/Test Configurations                                  |
+# +------------------------------------------------------------+
+build --output_filter="^//"
+build --show_timestamps
+build --spawn_strategy=local
+build --verbose_failures
+# Include external repos with -isystem so their warnings do not trip -Werror.
+build --features=external_include_paths
+build -c opt
+
+build --per_file_copt="-\\.$@-Wall,-Wextra,-Werror"
+build --per_file_copt="-\\.$,external/.*@-w"
+build --per_file_copt="-\\.$,third_party/.*@-w"
+
+# C sources target the embedded system: keep them C11.
+build --conlyopt="-std=c11"
+build --cxxopt="-std=c++17"
+build --copt="-Werror=switch"
+build --cxxopt="-Werror=reorder"
+build --copt="-fno-canonical-system-headers"
+build --cxxopt="-fno-canonical-system-headers"
+build --copt="-fdiagnostics-color=always"
+build --cxxopt="-Wno-error=unused-variable"
+build --cxxopt="-Wno-error=unused-parameter"
+build --cxxopt="-Wno-error=unused-but-set-variable"
+build --cxxopt="-Wno-unused"
+
+test --test_output=errors
+test --spawn_strategy=local
+
+try-import %workspace%/clang.bazelrc
+build:clang --action_env=LLVM_VERSION
+build:clang --host_copt="-Wno-deprecated-builtins"
+
+build:aarch64 --platforms=//toolchain:linux_aarch64
+build:aarch64 --nostart_end_lib
+build:aarch64 --copt=-fPIC
+
+try-import %workspace%/user.bazelrc

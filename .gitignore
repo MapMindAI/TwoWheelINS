@@ -1,0 +1,19 @@
+# Bazel output symlinks and user overrides
+/bazel-*
+/user.bazelrc
+/external
+/compile_commands.json
+/.cache/
+
+# Local datasets/captures (MOKUKU recordings) and run outputs
+/data/
+/output/
+log*.txt
+
+# Editors / tools
+.vscode/
+.idea/
+*.swp
+__pycache__/
+.claude/
+.codex

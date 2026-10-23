@@ -1,0 +1,80 @@
+# Common flags for Clang.
+build:clang --action_env=CC=clang
+build:clang --action_env=CXX=clang++
+# Use ld.lld instead of ld.gold.
+build:clang --linkopt -fuse-ld=lld
+# Turn warning into a warning even if -Werror is specified.
+build:clang --per_file_copt=+//.*@-Wno-error
+# Enable warning "thread-safety" and turn into errors.
+build:clang --per_file_copt=+//.*@-Werror=thread-safety
+
+# Use libc++.
+build:libc++ --copt -stdlib=libc++
+build:libc++ --linkopt -lc++
+build:libc++ --linkopt -lc++abi
+build:libc++ --linkopt -lm
+
+# Common flags for sanitizers.
+build:sanitizer --config=clang
+build:sanitizer --strip=never
+build:sanitizer --copt -g
+build:sanitizer --copt -fno-omit-frame-pointer
+# To workaround bazel dependency check for blacklist files.
+# See https://github.com/bazelbuild/bazel/issues/10510.
+# TODO: Add default blacklist files back.
+build:sanitizer --copt -fno-sanitize-blacklist
+
+# Address sanitizer.
+build:asan --config=sanitizer
+build:asan --copt -fsanitize=address
+build:asan --linkopt -fsanitize=address
+build:asan --copt -fsanitize-address-use-after-scope
+# build:asan --copt -DADDRESS_SANITIZER  # Used by absl.
+# Memory leak detection is turned on by default on Linux.
+# Check https://github.com/google/sanitizers/wiki/AddressSanitizerFlags.
+build:asan --test_env=ASAN_OPTIONS=strict_string_checks=1:detect_stack_use_after_return=1:check_initialization_order=1:strict_init_order=1
+build:asan --test_tag_filters=-no_asan
+
+# Thread sanitizer.
+build:tsan --config=sanitizer
+build:tsan --copt -fsanitize=thread
+build:tsan --linkopt -fsanitize=thread
+# build:tsan --copt -DTHREAD_SANITIZER  # Used by absl.
+# build:tsan --copt -DDYNAMIC_ANNOTATIONS_ENABLED=1  # Used by absl.
+# build:tsan --copt -DDYNAMIC_ANNOTATIONS_EXTERNAL_IMPL=1  # Used by absl.
+build:tsan --test_env=TSAN_OPTIONS=halt_on_error=1
+build:tsan --test_tag_filters=-no_tsan
+
+# Memory sanitizer.
+build:msan --config=sanitizer
+build:msan --copt -fsanitize=memory
+build:msan --linkopt -fsanitize=memory
+build:msan --copt -fsanitize-memory-track-origins
+build:msan --copt -fsanitize-memory-use-after-dtor
+# MSAN needs -O1 to get reasonable performance.
+build:msan --copt -O1
+# build:msan --copt -DMEMORY_SANITIZER  # Used by absl.
+build:msan --test_env=MSAN_OPTIONS=poison_in_dtor=1
+# Check https://github.com/google/sanitizers/wiki/MemorySanitizerLibcxxHowTo.
+build:msan --config=libc++
+build:msan --linkopt=-L/opt/libcxx_msan/lib/x86_64-unknown-linux-gnu
+build:msan --linkopt=-Wl,-rpath,/opt/libcxx_msan/lib/x86_64-unknown-linux-gnu
+build:msan --test_tag_filters=-no_msan
+
+# Undefined Behavior Sanitizer.
+build:ubsan --config=sanitizer
+build:ubsan --copt -fsanitize=undefined
+build:ubsan --linkopt -fsanitize=undefined
+# build:ubsan --copt -DUNDEFINED_BEHAVIOR_SANITIZER  # Used by absl.
+build:ubsan --linkopt -lubsan
+build:ubsan --test_env=UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
+build:ubsan --test_tag_filters=-no_ubsan
+# TODO: vptr & function require ubsan runtime library but caused
+# core dump with following options:
+#  build:ubsan --linkopt=-L/opt/llvm/lib/clang/current/lib/linux
+#  build:ubsan --linkopt=-l:libclang_rt.ubsan_standalone-x86_64.a
+#  build:ubsan --linkopt=-l:libclang_rt.ubsan_standalone_cxx-x86_64.a
+# Or:
+#  build:ubsan --linkopt=-L/opt/llvm/lib/clang/current/lib/linux
+#  build:ubsan --linkopt=-l:libclang_rt.ubsan_standalone-x86_64.so
+build:ubsan --copt -fno-sanitize=vptr,function
