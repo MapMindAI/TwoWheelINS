@@ -43,6 +43,18 @@ Eigen::Matrix<double, Eigen::Dynamic, StateIkfom::DOF> DPoseMeasurementDx(
 Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> DPoseMeasurementDv(StateIkfom& state,
                                                                          bool& valid);  // NOLINT
 
+// measurement of imu position (in world reference frame), e.g. GPS
+Eigen::Matrix<double, Eigen::Dynamic, 1> PositionMeasurement(StateIkfom& state,  // NOLINT
+                                                             bool& valid);       // NOLINT
+
+Eigen::Matrix<double, Eigen::Dynamic, StateIkfom::DOF> DPositionMeasurementDx(
+    const Eigen::VectorXd& residual, const Eigen::VectorXd& obs, const StateIkfom& state,
+    bool valid);
+
+Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> DPositionMeasurementDv(
+    StateIkfom& state,
+    bool& valid);  // NOLINT
+
 // measurement of imu velocity (in world reference frame)
 Eigen::Matrix<double, Eigen::Dynamic, 1> WorldVelocityMeasurement(StateIkfom& state,  // NOLINT
                                                                   bool& valid);       // NOLINT

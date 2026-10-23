@@ -14,3 +14,13 @@ cc_library(
     hdrs = ["imu_intrinsics.h"],
     deps = ["@eigen"],
 )
+
+cc_library(
+    name = "gps_data",
+    hdrs = ["gps_data.h"],
+)
+
+cc_library(
+    name = "wheel_speed_data",
+    hdrs = ["wheel_speed_data.h"],
+)

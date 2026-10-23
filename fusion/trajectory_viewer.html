@@ -1,0 +1,584 @@
+<!doctype html>
+<!-- Copyright 2026 MapMind -->
+<!-- SPDX-License-Identifier: GPL-2.0-only -->
+<!-- Viewer for TUM trajectories (t x y z qx qy qz qw), e.g. the output of //fusion:ins_fusion_main.
+     Open it in a browser and pick or drop the file. A "# UTM zone <number><N|S>" comment line marks
+     x/y as UTM easting/northing: the 3D view (WebGL) then lays Esri World Imagery under the
+     trajectory, and the 2D map view (Leaflet) is enabled; both need network. Without the header
+     the 3D view shows a grid and works offline. -->
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trajectory Viewer</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #15171a; color: #d8dde3;
+               font: 13px/1.5 system-ui, sans-serif; }
+  #view, #map { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #view { display: block; cursor: grab; }
+  #map { display: none; background: #15171a; }
+  body.map-mode #map { display: block; }
+  body.map-mode #view, body.map-mode #help, body.map-mode #attribution { display: none; }
+  #panel { position: absolute; z-index: 1000; top: 12px; left: 12px; max-width: calc(100% - 48px);
+           padding: 8px 12px; border-radius: 6px; background: rgba(21, 23, 26, 0.85); }
+  #panel h1 { margin: 0 0 6px; font-size: 14px; }
+  #modes { display: none; margin: 6px 0; }
+  #modes button { padding: 2px 10px; border: 1px solid #3d4450; background: #22262c; color: inherit;
+                  font: inherit; cursor: pointer; }
+  #modes button:first-child { border-radius: 4px 0 0 4px; }
+  #modes button:last-child { border-radius: 0 4px 4px 0; border-left: none; }
+  #modes button.active { background: #3d8bff; border-color: #3d8bff; color: #fff; }
+  .swatch { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 2px; }
+  #legend { display: none; }
+  body.map-mode .legend-3d { display: none; }
+  #help { position: absolute; bottom: 12px; left: 12px; padding: 2px 6px; border-radius: 4px;
+          background: rgba(21, 23, 26, 0.6); pointer-events: none; }
+  #attribution { position: absolute; right: 0; bottom: 0; display: none; padding: 1px 6px;
+                 background: rgba(21, 23, 26, 0.6); font-size: 11px; pointer-events: none; }
+  #drop { position: absolute; z-index: 1001; inset: 0; display: none; align-items: center;
+          justify-content: center; background: rgba(61, 139, 255, 0.15); border: 2px dashed #3d8bff;
+          font-size: 18px; pointer-events: none; }
+  body.dragging #drop { display: flex; }
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<div id="map"></div>
+<div id="panel">
+  <h1>Trajectory viewer</h1>
+  <input id="file" type="file" accept=".tum,.txt,text/plain">
+  <div id="modes"><button data-mode="3d">3D</button><button data-mode="map">Map</button></div>
+  <div id="stats">Open or drop a TUM trajectory (t x y z qx qy qz qw).</div>
+  <div id="legend">
+    <div><span class="swatch" style="background: linear-gradient(90deg, #3d8bff, #ffb020)"></span>pose (start &rarr; end)</div>
+    <div class="legend-3d"><span class="swatch" style="background: linear-gradient(90deg, #f24d4d 33%, #59d966 33% 66%, #598cff 66%)"></span>body x / y / z axes</div>
+  </div>
+</div>
+<div id="help">Drag: rotate &middot; Shift/right-drag: pan &middot; Wheel: zoom &middot; T: top view &middot; R: reset</div>
+<div id="attribution">Imagery &copy; Esri, Maxar, Earthstar Geographics, and the GIS User Community</div>
+<div id="drop">Drop a TUM trajectory file</div>
+<script>
+'use strict';
+
+const MAX_AXES = 400;
+const MAP_SEGMENTS = 64;
+const IMAGERY_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+const IMAGERY_ATTRIBUTION = 'Imagery &copy; Esri, Maxar, Earthstar Geographics, and the GIS User Community';
+const MAX_IMAGERY_TILES = 96;
+const MAX_IMAGERY_ZOOM = 19;
+const canvas = document.getElementById('view');
+const stats = document.getElementById('stats');
+const gl = canvas.getContext('webgl', { antialias: true });
+
+// ---- parsing --------------------------------------------------------------------------------
+// Returns positions relative to the first pose, and the UTM zone if the header declares one.
+function parseTum(text) {
+  const times = [], absolute = [], quaternions = [];
+  let utm = null;
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('#')) {
+      const match = trimmed.match(/UTM zone\s*(\d+)\s*([NS])/i);
+      if (match) utm = { zone: Number(match[1]), south: match[2].toUpperCase() === 'S' };
+      continue;
+    }
+    const values = trimmed.split(/[\s,]+/).slice(0, 8).map(Number);
+    if (values.length < 8 || values.some(Number.isNaN)) continue;
+    times.push(values[0]);
+    absolute.push(values.slice(1, 4));
+    quaternions.push(values.slice(4, 8));
+  }
+  if (times.length === 0) throw new Error('no "t x y z qx qy qz qw" lines found');
+  const origin = absolute[0];
+  const positions = new Float64Array(3 * absolute.length);
+  absolute.forEach((p, i) => { for (let k = 0; k < 3; ++k) positions[3 * i + k] = p[k] - origin[k]; });
+  return { times, origin, positions, quaternions, utm };
+}
+
+// Columns of the rotation matrix of (qx, qy, qz, qw): the body axes in the world frame.
+function bodyAxes([x, y, z, w]) {
+  const n = Math.hypot(x, y, z, w);
+  x /= n; y /= n; z /= n; w /= n;
+  return [[1 - 2 * (y * y + z * z), 2 * (x * y + w * z), 2 * (x * z - w * y)],
+          [2 * (x * y - w * z), 1 - 2 * (x * x + z * z), 2 * (y * z + w * x)],
+          [2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y)]];
+}
+
+// ---- geodesy --------------------------------------------------------------------------------
+// WGS84 UTM via the Krueger series to third order in n (sub-millimetre within a zone), matching
+// common/math/geodesy.cc.
+const UTM = (() => {
+  const a = 6378137.0, f = 1 / 298.257223563, n = f / (2 - f), n2 = n * n, n3 = n2 * n;
+  return {
+    scale: 0.9996 * a / (1 + n) * (1 + n2 / 4 + n2 * n2 / 64),
+    e: 2 * Math.sqrt(n) / (1 + n),
+    alpha: [n / 2 - 2 * n2 / 3 + 5 * n3 / 16, 13 * n2 / 48 - 3 * n3 / 5, 61 * n3 / 240],
+    beta: [n / 2 - 2 * n2 / 3 + 37 * n3 / 96, n2 / 48 + n3 / 15, 17 * n3 / 480],
+    delta: [2 * n - 2 * n2 / 3 - 2 * n3, 7 * n2 / 3 - 8 * n3 / 5, 56 * n3 / 15],
+  };
+})();
+const DEGREES = 180 / Math.PI;
+
+function latLngToUtm([latitudeDeg, longitudeDeg], { zone, south }) {
+  const sinLatitude = Math.sin(latitudeDeg / DEGREES);
+  const longitude = (longitudeDeg - (6 * zone - 183)) / DEGREES;
+  const t = Math.sinh(Math.atanh(sinLatitude) - UTM.e * Math.atanh(UTM.e * sinLatitude));
+  const xi = Math.atan2(t, Math.cos(longitude));
+  const eta = Math.atanh(Math.sin(longitude) / Math.sqrt(1 + t * t));
+  let easting = eta, northing = xi;
+  for (let j = 1; j <= 3; ++j) {
+    easting += UTM.alpha[j - 1] * Math.cos(2 * j * xi) * Math.sinh(2 * j * eta);
+    northing += UTM.alpha[j - 1] * Math.sin(2 * j * xi) * Math.cosh(2 * j * eta);
+  }
+  return [500000 + UTM.scale * easting, (south ? 10000000 : 0) + UTM.scale * northing];
+}
+
+function utmToLatLng(easting, northing, { zone, south }) {
+  const xi = (northing - (south ? 10000000 : 0)) / UTM.scale;
+  const eta = (easting - 500000) / UTM.scale;
+  let xiPrime = xi, etaPrime = eta;
+  for (let j = 1; j <= 3; ++j) {
+    xiPrime -= UTM.beta[j - 1] * Math.sin(2 * j * xi) * Math.cosh(2 * j * eta);
+    etaPrime -= UTM.beta[j - 1] * Math.cos(2 * j * xi) * Math.sinh(2 * j * eta);
+  }
+  const chi = Math.asin(Math.sin(xiPrime) / Math.cosh(etaPrime));
+  let latitude = chi;
+  for (let j = 1; j <= 3; ++j) latitude += UTM.delta[j - 1] * Math.sin(2 * j * chi);
+  const longitude = (6 * zone - 183) / DEGREES + Math.atan2(Math.sinh(etaPrime), Math.cos(xiPrime));
+  return [latitude * DEGREES, longitude * DEGREES];
+}
+
+// Web Mercator (slippy map) tile coordinates.
+function tileToLatLng(x, y, zoom) {
+  const tiles = Math.pow(2, zoom);
+  return [Math.atan(Math.sinh(Math.PI * (1 - 2 * y / tiles))) * DEGREES, x / tiles * 360 - 180];
+}
+function latLngToTile([latitude, longitude], zoom) {
+  const tiles = Math.pow(2, zoom), sinLatitude = Math.sin(latitude / DEGREES);
+  return [(longitude + 180) / 360 * tiles,
+          (0.5 - Math.log((1 + sinLatitude) / (1 - sinLatitude)) / (4 * Math.PI)) * tiles];
+}
+
+function trajectoryColor(t) {  // blue -> orange
+  return [0.24 + 0.76 * t, 0.55 + 0.14 * t, 1.0 - 0.87 * t];
+}
+function cssColor(rgb) { return `rgb(${rgb.map((c) => Math.round(255 * c)).join(',')})`; }
+
+// ---- 2D map view ----------------------------------------------------------------------------
+let map = null, mapLayer = null;
+
+function showOnMap(origin, positions, utm) {
+  if (!map) {
+    map = L.map('map', { preferCanvas: true, zoomControl: false });
+    L.control.zoom({ position: 'topright' }).addTo(map);
+    L.control.scale({ position: 'bottomright', imperial: false }).addTo(map);
+    L.tileLayer(IMAGERY_URL, { maxZoom: 21, maxNativeZoom: MAX_IMAGERY_ZOOM,
+                               attribution: IMAGERY_ATTRIBUTION }).addTo(map);
+  }
+  if (mapLayer) mapLayer.remove();
+  mapLayer = L.layerGroup().addTo(map);
+
+  const count = positions.length / 3;
+  const latLngs = [];
+  for (let i = 0; i < count; ++i) {
+    latLngs.push(utmToLatLng(origin[0] + positions[3 * i], origin[1] + positions[3 * i + 1], utm));
+  }
+  // one polyline per segment so the colour follows time; neighbours share an endpoint
+  const step = Math.max(1, Math.ceil(count / MAP_SEGMENTS));
+  for (let start = 0; start < count - 1; start += step) {
+    const end = Math.min(count - 1, start + step);
+    L.polyline(latLngs.slice(start, end + 1),
+               { color: cssColor(trajectoryColor(start / Math.max(1, count - 1))), weight: 3, opacity: 0.95 })
+        .addTo(mapLayer);
+  }
+  const marker = (latLng, color, label) => L.circleMarker(latLng, {
+    radius: 6, color: '#fff', weight: 2, fillColor: color, fillOpacity: 1,
+  }).bindTooltip(label).addTo(mapLayer);
+  marker(latLngs[0], '#59d966', 'start');
+  marker(latLngs[count - 1], '#f24d4d', 'end');
+  map.invalidateSize();
+  map.fitBounds(L.latLngBounds(latLngs), { padding: [40, 40] });
+}
+
+// ---- 3D view: GL setup ----------------------------------------------------------------------
+function compile(type, source) {
+  const shader = gl.createShader(type);
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(shader));
+  return shader;
+}
+function link(vertexSource, fragmentSource) {
+  const program = gl.createProgram();
+  gl.attachShader(program, compile(gl.VERTEX_SHADER, vertexSource));
+  gl.attachShader(program, compile(gl.FRAGMENT_SHADER, fragmentSource));
+  gl.linkProgram(program);
+  return program;
+}
+
+let lineProgram, imageryProgram;
+if (gl) {
+  lineProgram = link(`
+    attribute vec3 position;
+    attribute vec3 color;
+    uniform mat4 mvp;
+    uniform float pointSize;
+    varying vec3 vColor;
+    void main() {
+      gl_Position = mvp * vec4(position, 1.0);
+      gl_PointSize = pointSize;
+      vColor = color;
+    }`, `
+    precision mediump float;
+    varying vec3 vColor;
+    void main() { gl_FragColor = vec4(vColor, 1.0); }`);
+  imageryProgram = link(`
+    attribute vec3 position;
+    attribute vec2 uv;
+    uniform mat4 mvp;
+    varying vec2 vUv;
+    void main() {
+      gl_Position = mvp * vec4(position, 1.0);
+      vUv = uv;
+    }`, `
+    precision mediump float;
+    uniform sampler2D image;
+    varying vec2 vUv;
+    void main() { gl_FragColor = texture2D(image, vUv); }`);
+  for (const program of [lineProgram, imageryProgram]) {
+    program.locations = {};
+    for (const name of ['position', 'color', 'uv']) program.locations[name] = gl.getAttribLocation(program, name);
+    for (const name of ['mvp', 'pointSize', 'image']) program.locations[name] = gl.getUniformLocation(program, name);
+  }
+}
+
+function makeBuffer(vertices) {
+  const buffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+  return buffer;
+}
+function makeLayer(mode, vertices, pointSize) {  // interleaved [x, y, z, r, g, b]
+  return { mode, buffer: makeBuffer(vertices), count: vertices.length / 6, pointSize: pointSize || 1 };
+}
+
+// ---- 3D view: scene -------------------------------------------------------------------------
+let layers = [];        // grid, trajectory, axes, endpoints
+let imageryTiles = [];  // { buffer, texture }
+let imageryGeneration = 0;
+let scene = null;       // { center, extent }
+
+function buildScene(positions, quaternions, min, max) {
+  const count = quaternions.length;
+  const extent = Math.max(max[0] - min[0], max[1] - min[1], 1.0);
+  const trajectory = [];
+  for (let i = 0; i < count; ++i) {
+    trajectory.push(...positions.subarray(3 * i, 3 * i + 3),
+                    ...trajectoryColor(count > 1 ? i / (count - 1) : 0));
+  }
+
+  const axes = [];
+  const axisLength = Math.max(0.01 * extent, 0.5);
+  const axisColors = [[0.95, 0.3, 0.3], [0.35, 0.85, 0.4], [0.35, 0.55, 1.0]];
+  const stride = Math.max(1, Math.floor(count / MAX_AXES));
+  for (let i = 0; i < count; i += stride) {
+    const p = positions.subarray(3 * i, 3 * i + 3);
+    bodyAxes(quaternions[i]).forEach((d, k) => {
+      axes.push(...p, ...axisColors[k],
+                p[0] + axisLength * d[0], p[1] + axisLength * d[1], p[2] + axisLength * d[2],
+                ...axisColors[k]);
+    });
+  }
+
+  const endpoints = [...positions.subarray(0, 3), 0.35, 0.85, 0.4,
+                     ...positions.subarray(3 * count - 3), 0.95, 0.3, 0.3];
+
+  const grid = [];
+  const spacing = Math.pow(10, Math.floor(Math.log10(extent / 4)));
+  const gridMin = [Math.floor(min[0] / spacing) * spacing, Math.floor(min[1] / spacing) * spacing];
+  const gridMax = [Math.ceil(max[0] / spacing) * spacing, Math.ceil(max[1] / spacing) * spacing];
+  const gray = [0.25, 0.27, 0.3];
+  for (let x = gridMin[0]; x <= gridMax[0] + 1e-6; x += spacing) {
+    grid.push(x, gridMin[1], min[2], ...gray, x, gridMax[1], min[2], ...gray);
+  }
+  for (let y = gridMin[1]; y <= gridMax[1] + 1e-6; y += spacing) {
+    grid.push(gridMin[0], y, min[2], ...gray, gridMax[0], y, min[2], ...gray);
+  }
+
+  for (const layer of layers) gl.deleteBuffer(layer.buffer);
+  layers = [makeLayer(gl.LINES, grid), makeLayer(gl.LINE_STRIP, trajectory),
+            makeLayer(gl.LINES, axes), makeLayer(gl.POINTS, endpoints, 8)];
+  scene = { center: [0.5 * (min[0] + max[0]), 0.5 * (min[1] + max[1]), 0.5 * (min[2] + max[2])], extent };
+  resetCamera(false);
+  return spacing;
+}
+
+// Lays satellite tiles covering the trajectory (plus a margin) on the plane z = groundZ. Each tile
+// is a quad through its corners projected to UTM; inside a tile the Web Mercator -> UTM mapping
+// is close to affine.
+function loadImagery(origin, min, max, utm, groundZ) {
+  const generation = ++imageryGeneration;
+  for (const tile of imageryTiles) {
+    gl.deleteBuffer(tile.buffer);
+    if (tile.texture) gl.deleteTexture(tile.texture);
+  }
+  imageryTiles = [];
+  document.getElementById('attribution').style.display = 'none';
+
+  const margin = 0.1 * Math.max(max[0] - min[0], max[1] - min[1], 100);
+  const corners = [[min[0] - margin, min[1] - margin], [max[0] + margin, min[1] - margin],
+                   [min[0] - margin, max[1] + margin], [max[0] + margin, max[1] + margin]]
+      .map(([x, y]) => utmToLatLng(origin[0] + x, origin[1] + y, utm));
+  let zoom = MAX_IMAGERY_ZOOM, range;
+  for (; zoom > 0; --zoom) {
+    const tiles = corners.map((corner) => latLngToTile(corner, zoom));
+    range = [Math.floor(Math.min(...tiles.map((t) => t[0]))), Math.floor(Math.max(...tiles.map((t) => t[0]))),
+             Math.floor(Math.min(...tiles.map((t) => t[1]))), Math.floor(Math.max(...tiles.map((t) => t[1])))];
+    if ((range[1] - range[0] + 1) * (range[3] - range[2] + 1) <= MAX_IMAGERY_TILES) break;
+  }
+
+  const local = (x, y) => {
+    const [easting, northing] = latLngToUtm(tileToLatLng(x, y, zoom), utm);
+    return [easting - origin[0], northing - origin[1], groundZ];
+  };
+  for (let x = range[0]; x <= range[1]; ++x) {
+    for (let y = range[2]; y <= range[3]; ++y) {
+      const northWest = local(x, y), northEast = local(x + 1, y);
+      const southWest = local(x, y + 1), southEast = local(x + 1, y + 1);
+      const tile = {
+        buffer: makeBuffer([...northWest, 0, 0, ...southWest, 0, 1, ...northEast, 1, 0,
+                            ...northEast, 1, 0, ...southWest, 0, 1, ...southEast, 1, 1]),
+        texture: null,
+      };
+      imageryTiles.push(tile);
+      const image = new Image();
+      image.crossOrigin = 'anonymous';
+      image.onload = () => {
+        if (generation !== imageryGeneration) return;
+        tile.texture = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, tile.texture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, image);
+        gl.generateMipmap(gl.TEXTURE_2D);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        document.getElementById('attribution').style.display = 'block';
+        requestDraw();
+      };
+      image.src = IMAGERY_URL.replace('{z}', zoom).replace('{x}', x).replace('{y}', y);
+    }
+  }
+  return zoom;
+}
+
+// ---- loading --------------------------------------------------------------------------------
+function loadTrajectory(text, name) {
+  const { times, origin, positions, quaternions, utm } = parseTum(text);
+  const count = times.length;
+  const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+  let pathLength = 0;
+  for (let i = 0; i < count; ++i) {
+    for (let k = 0; k < 3; ++k) {
+      min[k] = Math.min(min[k], positions[3 * i + k]);
+      max[k] = Math.max(max[k], positions[3 * i + k]);
+    }
+    if (i > 0) pathLength += Math.hypot(positions[3 * i] - positions[3 * i - 3],
+                                        positions[3 * i + 1] - positions[3 * i - 2],
+                                        positions[3 * i + 2] - positions[3 * i - 1]);
+  }
+
+  const spacing = gl ? buildScene(positions, quaternions, min, max) : null;
+  const imageryZoom = gl && utm ? loadImagery(origin, min, max, utm, min[2]) : null;
+  const mapAvailable = Boolean(utm && window.L);
+  if (mapAvailable) {
+    setMode('map');  // the map can only fit its bounds while its container is visible
+    showOnMap(origin, positions, utm);
+  }
+  setMode(gl ? '3d' : 'map');
+
+  const extent = Math.max(max[0] - min[0], max[1] - min[1]);
+  const duration = times[count - 1] - times[0];
+  const notes = [];
+  if (!utm) notes.push('no "# UTM zone" header: no satellite imagery or map');
+  else if (!window.L) notes.push('Leaflet failed to load (offline?): map view unavailable');
+  if (!gl) notes.push('WebGL unavailable: 3D view disabled');
+  stats.innerHTML =
+      `<b>${name}</b><br>${count} poses over ${duration.toFixed(1)} s, ` +
+      `path ${(pathLength / 1000).toFixed(2)} km<br>` +
+      `extent ${extent.toFixed(0)} m, height ${min[2].toFixed(1)} to ${max[2].toFixed(1)} m<br>` +
+      (utm ? `UTM zone ${utm.zone}${utm.south ? 'S' : 'N'}, ` : '') +
+      `first pose ${origin.map((v) => v.toFixed(2)).join(', ')}<br>` +
+      (imageryZoom ? `ground: satellite tiles (zoom ${imageryZoom}) at lowest height<br>`
+                   : spacing ? `ground: ${spacing} m grid at lowest height<br>` : '') +
+      `start <span style="color:#59d966">&#9679;</span> end <span style="color:#f24d4d">&#9679;</span>` +
+      notes.map((note) => `<br><i>${note}</i>`).join('');
+  document.getElementById('legend').style.display = 'block';
+  document.getElementById('modes').style.display = mapAvailable && gl ? 'block' : 'none';
+}
+
+function loadFile(file) {
+  if (!file) return;
+  file.text().then((text) => loadTrajectory(text, file.name))
+      .catch((error) => { stats.textContent = `Cannot load ${file.name}: ${error.message}`; });
+}
+document.getElementById('file').addEventListener('change', (event) => loadFile(event.target.files[0]));
+window.addEventListener('dragover', (event) => { event.preventDefault(); document.body.classList.add('dragging'); });
+window.addEventListener('dragleave', () => document.body.classList.remove('dragging'));
+window.addEventListener('drop', (event) => {
+  event.preventDefault();
+  document.body.classList.remove('dragging');
+  loadFile(event.dataTransfer.files[0]);
+});
+
+function setMode(mode) {
+  document.body.classList.toggle('map-mode', mode === 'map');
+  for (const button of document.querySelectorAll('#modes button')) {
+    button.classList.toggle('active', button.dataset.mode === mode);
+  }
+  if (mode === 'map') {
+    if (map) map.invalidateSize();
+  } else {
+    requestDraw();
+  }
+}
+for (const button of document.querySelectorAll('#modes button')) {
+  button.addEventListener('click', () => setMode(button.dataset.mode));
+}
+
+// ---- 3D view: camera ------------------------------------------------------------------------
+const camera = {};
+function resetCamera(top) {
+  if (!scene) return;
+  Object.assign(camera, { target: scene.center.slice(), distance: 1.3 * scene.extent,
+                          yaw: -Math.PI / 2, pitch: top ? 1.55 : 0.9 });
+}
+
+function normalize(v) { const n = Math.hypot(...v); return v.map((x) => x / n); }
+function cross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+
+function cameraBasis() {
+  const back = [Math.cos(camera.pitch) * Math.cos(camera.yaw),
+                Math.cos(camera.pitch) * Math.sin(camera.yaw), Math.sin(camera.pitch)];
+  const right = normalize(cross([0, 0, 1], back));
+  return { back, right, up: cross(back, right) };
+}
+
+function viewProjection() {  // column-major, as WebGL expects
+  const { back, right, up } = cameraBasis();
+  const eye = camera.target.map((t, k) => t + camera.distance * back[k]);
+  const view = [right[0], up[0], back[0], 0, right[1], up[1], back[1], 0,
+                right[2], up[2], back[2], 0, -dot(right, eye), -dot(up, eye), -dot(back, eye), 1];
+  const near = 0.01 * camera.distance, far = 100 * camera.distance;
+  const f = 1 / Math.tan(Math.PI / 8), aspect = canvas.width / canvas.height;
+  const projection = [f / aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, (far + near) / (near - far), -1,
+                      0, 0, 2 * far * near / (near - far), 0];
+  const result = new Array(16).fill(0);
+  for (let c = 0; c < 4; ++c)
+    for (let r = 0; r < 4; ++r)
+      for (let k = 0; k < 4; ++k) result[4 * c + r] += projection[4 * k + r] * view[4 * c + k];
+  return result;
+}
+
+// ---- 3D view: rendering ---------------------------------------------------------------------
+let frameRequested = false;
+function requestDraw() {
+  if (gl && !frameRequested) { frameRequested = true; requestAnimationFrame(draw); }
+}
+
+function bindAttribute(location, size, stride, offset) {
+  if (location < 0) return;
+  gl.enableVertexAttribArray(location);
+  gl.vertexAttribPointer(location, size, gl.FLOAT, false, stride, offset);
+}
+
+function draw() {
+  frameRequested = false;
+  const ratio = window.devicePixelRatio || 1;
+  const width = Math.round(canvas.clientWidth * ratio), height = Math.round(canvas.clientHeight * ratio);
+  if (width === 0 || height === 0) return;  // hidden in map mode
+  if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
+  gl.viewport(0, 0, width, height);
+  gl.clearColor(0.082, 0.09, 0.102, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  if (!scene) return;
+  gl.enable(gl.DEPTH_TEST);
+  const mvp = new Float32Array(viewProjection());
+
+  const loadedTiles = imageryTiles.filter((tile) => tile.texture);
+  if (loadedTiles.length > 0) {
+    gl.useProgram(imageryProgram);
+    const locations = imageryProgram.locations;
+    gl.uniformMatrix4fv(locations.mvp, false, mvp);
+    gl.uniform1i(locations.image, 0);
+    gl.activeTexture(gl.TEXTURE0);
+    for (const tile of loadedTiles) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, tile.buffer);
+      bindAttribute(locations.position, 3, 20, 0);
+      bindAttribute(locations.uv, 2, 20, 12);
+      gl.bindTexture(gl.TEXTURE_2D, tile.texture);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+    gl.disableVertexAttribArray(locations.uv);
+  }
+
+  gl.useProgram(lineProgram);
+  const locations = lineProgram.locations;
+  gl.uniformMatrix4fv(locations.mvp, false, mvp);
+  // the grid stands in for the imagery until a tile has loaded
+  for (const layer of loadedTiles.length > 0 ? layers.slice(1) : layers) {
+    if (layer.count === 0) continue;
+    gl.bindBuffer(gl.ARRAY_BUFFER, layer.buffer);
+    bindAttribute(locations.position, 3, 24, 0);
+    bindAttribute(locations.color, 3, 24, 12);
+    gl.uniform1f(locations.pointSize, layer.pointSize * ratio);
+    gl.drawArrays(layer.mode, 0, layer.count);
+  }
+}
+
+// ---- 3D view: interaction -------------------------------------------------------------------
+let drag = null;
+canvas.addEventListener('contextmenu', (event) => event.preventDefault());
+canvas.addEventListener('mousedown', (event) => {
+  drag = { x: event.clientX, y: event.clientY, pan: event.button === 2 || event.shiftKey };
+  canvas.style.cursor = 'grabbing';
+});
+window.addEventListener('mouseup', () => { drag = null; canvas.style.cursor = 'grab'; });
+window.addEventListener('mousemove', (event) => {
+  if (!drag || !scene) return;
+  const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
+  drag.x = event.clientX;
+  drag.y = event.clientY;
+  if (drag.pan) {
+    const { right, up } = cameraBasis();
+    const scale = 2 * camera.distance * Math.tan(Math.PI / 8) / canvas.clientHeight;
+    for (let k = 0; k < 3; ++k) camera.target[k] += scale * (-dx * right[k] + dy * up[k]);
+  } else {
+    camera.yaw -= 0.005 * dx;
+    camera.pitch = Math.min(1.55, Math.max(-1.55, camera.pitch + 0.005 * dy));
+  }
+  requestDraw();
+});
+canvas.addEventListener('wheel', (event) => {
+  event.preventDefault();
+  if (!scene) return;
+  camera.distance *= Math.exp(0.001 * event.deltaY);
+  requestDraw();
+}, { passive: false });
+window.addEventListener('keydown', (event) => {
+  if (document.body.classList.contains('map-mode')) return;
+  if (event.key === 'r' || event.key === 'R') resetCamera(false);
+  else if (event.key === 't' || event.key === 'T') resetCamera(true);
+  else return;
+  requestDraw();
+});
+window.addEventListener('resize', requestDraw);
+if (!gl) stats.textContent += ' (WebGL is not available: 3D view disabled.)';
+requestDraw();
+</script>
+</body>
+</html>

@@ -60,4 +60,50 @@ TEST(IkfLio, TracksSimulatedTrajectoryWithPoseUpdates) {
   EXPECT_LT((estimate.vel - simulation.velocities.back()).norm(), 0.1);
 }
 
+// Position-only updates (GPS without heading) must also recover attitude: the simulated
+// accelerations make yaw observable.
+TEST(IkfLio, RecoversAttitudeFromPositionUpdates) {
+  constexpr int kImuFps = 100;
+  constexpr int kPositionUpdateEvery = 10;
+  const simulation::ImuSimulation simulation =
+      simulation::SimulateImuData(0.0, 0.0, 30.0, kImuFps, Eigen::Vector3d(0, 0, -9.8099));
+
+  Filter filter;
+  double limit[StateIkfom::DOF];
+  std::fill(limit, limit + StateIkfom::DOF, 1e-3);
+  filter.init_dyn(GetVelocityField, DVelocityFieldDx, DVelocityFieldDw, 3, limit);
+  filter.add_dyn_vec(PositionMeasurement, DPositionMeasurementDx, DPositionMeasurementDv);
+
+  // start with a 0.3 rad yaw error
+  StateIkfom& state = filter.mutable_state();
+  state.pos = simulation.poses.front().translation();
+  state.rot = (Sophus::SO3d::rotZ(0.3) * simulation.poses.front().so3()).unit_quaternion();
+  state.vel = simulation.velocities.front();
+  state.grav = MTK::Gravity(simulation.gravity);
+  Eigen::Matrix<double, StateIkfom::DOF, StateIkfom::DOF>& covariance = filter.mutable_covariance();
+  covariance = 1e-4 * Eigen::Matrix<double, StateIkfom::DOF, StateIkfom::DOF>::Identity();
+  covariance.block<3, 3>(state.rot.IDX, state.rot.IDX) = 0.1 * Eigen::Matrix3d::Identity();
+
+  const auto process_noise = GetProcessNoiseCov(1e-4, 1e-4, 1e-6, 1e-6);
+  const Eigen::MatrixXd position_noise = 1e-4 * Eigen::MatrixXd::Identity(3, 3);
+  const double dt = 1.0 / kImuFps;
+
+  for (size_t i = 1; i < simulation.imu_data.size(); ++i) {
+    ImuIkfom input;
+    input.acc = simulation.imu_data[i].linear_acceleration;
+    input.gyro = simulation.imu_data[i].angular_velocity;
+    filter.predict(dt, process_noise, input);
+
+    if (i % kPositionUpdateEvery == 0) {
+      ASSERT_TRUE(filter.update_iterated_dyn(simulation.poses[i].translation(), position_noise));
+    }
+  }
+
+  const Sophus::SE3d& truth = simulation.poses.back();
+  const StateIkfom& estimate = filter.get_x();
+  EXPECT_LT((estimate.pos - truth.translation()).norm(), 0.05);
+  EXPECT_LT((Sophus::SO3d(estimate.rot).inverse() * truth.so3()).log().norm(), 0.02);
+  EXPECT_LT((estimate.vel - simulation.velocities.back()).norm(), 0.1);
+}
+
 }  // namespace mapmind::ikfom::ins

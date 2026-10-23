@@ -66,6 +66,24 @@ Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> DPoseMeasurementDv(
   return Eigen::Matrix<double, 6, 6>::Identity();
 }
 
+Eigen::Matrix<double, Eigen::Dynamic, 1> PositionMeasurement(StateIkfom& state,  // NOLINT
+                                                             bool& /*valid*/) {  // NOLINT
+  return state.pos;
+}
+
+Eigen::Matrix<double, Eigen::Dynamic, StateIkfom::DOF> DPositionMeasurementDx(
+    const Eigen::VectorXd&, const Eigen::VectorXd&, const StateIkfom& state, bool) {
+  Eigen::Matrix<double, 3, StateIkfom::DOF> derivative =
+      Eigen::Matrix<double, 3, StateIkfom::DOF>::Zero();
+  derivative.block(0, state.pos.IDX, 3, 3) = Eigen::Matrix3d::Identity();
+  return derivative;
+}
+
+Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> DPositionMeasurementDv(
+    StateIkfom& /*state*/, bool& /*valid*/) {  // NOLINT
+  return Eigen::Matrix<double, 3, 3>::Identity();
+}
+
 Eigen::Matrix<double, Eigen::Dynamic, 1> WorldVelocityMeasurement(StateIkfom& state,  // NOLINT
                                                                   bool& /*valid*/) {  // NOLINT
   return state.vel;

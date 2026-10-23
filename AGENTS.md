@@ -8,7 +8,8 @@ into a 6-DoF pose estimate. See `README.md` for the directory tree and build com
 | Path | Contents |
 |---|---|
 | `ikfom/` | C++17 iterated error-state Kalman filter on manifolds: `toolkit/` (MTK + esekfom, header-only), `backend/` (`ikf_ins`: IMU process model, pose/velocity measurements) |
-| `common/` | Shared C++ helpers: `math/` (so3/se3 Jacobians, covariance utils and transformations), `sensor/` (IMU data, intrinsics), `simulation/` (simulated IMU data with ground truth) |
+| `common/` | Shared C++ helpers: `math/` (so3/se3 Jacobians, covariance, UTM projection), `sensor/` (IMU, GPS, wheel-speed data), `reader/` (MOKUKU text record reader), `simulation/` (simulated IMU data with ground truth) |
+| `fusion/` | `InsFusion` (IMU + GPS on `ikf_ins`), `ins_fusion_main` (runs it on a record, writes TUM poses in UTM), `trajectory_viewer.html` (TUM viewer: 3D via WebGL over satellite imagery, 2D map via Leaflet) |
 | `MODULE.bazel` | All external deps (Bazel Central Registry); commit `MODULE.bazel.lock` with it |
 | `toolchain/` | aarch64 platform + cross-compile toolchain (`--config=aarch64`) |
 | `.github/workflows/ci.yml` | CI: `bazel test //...` |

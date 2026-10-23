@@ -39,3 +39,19 @@ cc_library(
     hdrs = ["covariance_test_utils.h"],
     deps = [":covariance"],
 )
+
+cc_library(
+    name = "geodesy",
+    srcs = ["geodesy.cc"],
+    hdrs = ["geodesy.h"],
+    deps = ["@eigen"],
+)
+
+cc_test(
+    name = "geodesy_test",
+    srcs = ["geodesy_test.cc"],
+    deps = [
+        ":geodesy",
+        "@googletest//:gtest_main",
+    ],
+)
