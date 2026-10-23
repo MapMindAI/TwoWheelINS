@@ -1,9 +1,9 @@
 // Copyright 2022 MapMind
 // SPDX-License-Identifier: GPL-2.0-only
 
-#include "ikfom/common/covariance_transformation.h"
+#include "common/math/covariance.h"
 
-namespace mapmind::ikfom {
+namespace mapmind::math {
 
 void GetRelativePoseMeasurementCovariance(const Sophus::SE3d& se3_w_b0,
                                           const Eigen::Matrix<double, 6, 6>& cov_w_b0,
@@ -175,4 +175,4 @@ void GetGlobalLocalizationMeasurementCovariance(
                                              measurement, covariance);
 }
 
-}  // namespace mapmind::ikfom
+}  // namespace mapmind::math

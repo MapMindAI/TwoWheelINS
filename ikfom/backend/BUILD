@@ -8,7 +8,9 @@ cc_library(
     hdrs = ["common.h"],
     deps = [
         "//common/math:sophus_utils",
-        "//ikfom/common:utils",
+        "//common/sensor:imu_data",
+        "//common/sensor:imu_intrinsics",
+        "//ikfom/toolkit:ikfom_toolkit",
     ],
 )
 
@@ -24,6 +26,7 @@ cc_test(
     srcs = ["ikf_ins_test.cc"],
     deps = [
         ":ikf_ins",
+        "//common/simulation:imu_simulation",
         "@googletest//:gtest_main",
     ],
 )

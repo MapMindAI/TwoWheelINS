@@ -1,9 +1,9 @@
 // Copyright 2022 MapMind
 // SPDX-License-Identifier: GPL-2.0-only
 
-#include "ikfom/common/utils.h"
+#include "common/simulation/imu_simulation.h"
 
-namespace mapmind::ikfom::utils {
+namespace mapmind::simulation {
 
 ImuSimulation SimulateImuData(double bias_acc, double bias_gyr, double duration_second, int imu_fps,
                               std::optional<Eigen::Vector3d> gravity) {
@@ -64,4 +64,4 @@ ImuSimulation SimulateImuData(double bias_acc, double bias_gyr, double duration_
   return result;
 }
 
-}  // namespace mapmind::ikfom::utils
+}  // namespace mapmind::simulation

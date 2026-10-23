@@ -5,7 +5,9 @@
 #define IKFOM_BACKEND_COMMON_H_
 
 #include "common/math/sophus_utils.h"
-#include "ikfom/common/utils.h"
+#include "common/sensor/imu_data.h"
+#include "common/sensor/imu_intrinsics.h"
+#include "ikfom/toolkit/esekfom/esekfom.hpp"
 
 // no template can be set as input of MTK_BUILD_MANIFOLD
 namespace MTK {
