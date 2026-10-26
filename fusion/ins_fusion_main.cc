@@ -7,7 +7,7 @@
 // trailing "# gps t_s easting_m northing_m altitude_m satellites" comments carry the record's GPS
 // fixes for the viewer to overlay.
 //
-// Usage: ins_fusion_main [--noconstrain_vertical_velocity] <record> <output.tum>
+// Usage: ins_fusion_main [--constrain_vertical_velocity] <record> <output.tum>
 
 #include <algorithm>
 #include <fstream>
@@ -23,7 +23,7 @@
 #include "common/reader/txt_record_reader.h"
 #include "fusion/ins_fusion.h"
 
-DEFINE_bool(constrain_vertical_velocity, true,
+DEFINE_bool(constrain_vertical_velocity, false,
             "level-road prior: near-zero world vertical velocity while moving");
 
 namespace mapmind::fusion {
@@ -120,7 +120,7 @@ int Run(const std::string& record_path, const std::string& output_path) {
 }  // namespace mapmind::fusion
 
 int main(int argc, char** argv) {
-  gflags::SetUsageMessage("[--noconstrain_vertical_velocity] <record> <output.tum>");
+  gflags::SetUsageMessage("[--constrain_vertical_velocity] <record> <output.tum>");
   gflags::ParseCommandLineFlags(&argc, &argv, /*remove_flags=*/true);
   if (argc != 3) {
     gflags::ShowUsageWithFlagsRestrict(argv[0], "fusion/ins_fusion_main");

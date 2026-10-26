@@ -9,7 +9,6 @@
 #include <Eigen/Dense>
 
 #include "common/math/geodesy.h"
-#include "fusion/gps_covariance.h"
 
 namespace mapmind::fusion {
 
@@ -112,10 +111,10 @@ std::optional<Eigen::Vector3d> InsFusion::AddGps(const sensor::GpsData& gps) {
   std::optional<Eigen::Vector3d> innovation;
   if (initialized_) {
     if (!IsStationary(gps.timestamp_ns)) {
-      innovation = UpdateGpsPosition(position, GpsCovariance(gps.satellite_count));
+      innovation = UpdateGpsPosition(position, sensor::GpsCovariance(gps.satellite_count));
     }
   } else if (!hypotheses_.empty()) {
-    UpdateYawHypotheses(position, GpsCovariance(gps.satellite_count));
+    UpdateYawHypotheses(position, sensor::GpsCovariance(gps.satellite_count));
   } else {
     StartYawHypotheses(gps);
   }
@@ -175,7 +174,7 @@ void InsFusion::StartYawHypotheses(const sensor::GpsData& gps) {
   }
 
   KfcoreIns::StateVector initial_std;
-  initial_std << GpsCovariance(gps.satellite_count).diagonal().cwiseSqrt(),
+  initial_std << sensor::GpsCovariance(gps.satellite_count).diagonal().cwiseSqrt(),
       Eigen::Vector3d::Constant(1.0), Eigen::Vector3d(0.05, 0.05, 0.3),
       Eigen::Vector3d::Constant(0.3), Eigen::Vector3d::Constant(0.02);
   for (int i = 0; i < kYawHypotheses; ++i) {

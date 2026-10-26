@@ -6,6 +6,8 @@
 
 #include <cstdint>
 
+#include <Eigen/Core>
+
 namespace mapmind::sensor {
 
 struct GpsData {
@@ -18,6 +20,10 @@ struct GpsData {
   double ground_speed_mps;
   int satellite_count;
 };
+
+// GPS position covariance (UTM easting, northing, altitude; m^2) for a fix from
+// `satellite_count` satellites: > 20 is a fix solution, 11-20 float, fewer single.
+Eigen::Matrix3d GpsCovariance(int satellite_count);
 
 }  // namespace mapmind::sensor
 

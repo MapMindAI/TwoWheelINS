@@ -3,13 +3,6 @@ load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 package(default_visibility = ["//visibility:public"])
 
 cc_library(
-    name = "gps_covariance",
-    srcs = ["gps_covariance.cc"],
-    hdrs = ["gps_covariance.h"],
-    deps = ["@eigen"],
-)
-
-cc_library(
     name = "kfcore_ins",
     srcs = ["kfcore_ins.cc"],
     hdrs = ["kfcore_ins.h"],
@@ -34,7 +27,6 @@ cc_library(
     srcs = ["ins_fusion.cc"],
     hdrs = ["ins_fusion.h"],
     deps = [
-        ":gps_covariance",
         ":kfcore_ins",
         "//common/math:geodesy",
         "//common/sensor:gps_data",
@@ -59,7 +51,6 @@ cc_test(
     name = "ins_fusion_test",
     srcs = ["ins_fusion_test.cc"],
     deps = [
-        ":gps_covariance",
         ":ins_fusion",
         "//common/math:geodesy",
         "@googletest//:gtest_main",

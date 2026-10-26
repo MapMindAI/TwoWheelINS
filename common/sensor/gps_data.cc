@@ -1,11 +1,11 @@
 // Copyright 2026 MapMind
 // SPDX-License-Identifier: BSD-3-Clause
 
-#include "fusion/gps_covariance.h"
+#include "common/sensor/gps_data.h"
 
 #include <algorithm>
 
-namespace mapmind::fusion {
+namespace mapmind::sensor {
 
 namespace {
 
@@ -38,4 +38,4 @@ Eigen::Matrix3d GpsCovariance(int satellite_count) {
   return Eigen::Vector3d(horizontal, horizontal, vertical).cwiseAbs2().asDiagonal();
 }
 
-}  // namespace mapmind::fusion
+}  // namespace mapmind::sensor

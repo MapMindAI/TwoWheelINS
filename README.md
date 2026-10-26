@@ -50,9 +50,9 @@ bazel build //fusion:ins_fusion_main
 bazel-bin/fusion/ins_fusion_main data/mobili_2.record output/mobili_2.tum
 ```
 
-While moving, the fusion assumes a level road (near-zero vertical velocity), since single-solution
-GPS altitude wanders tens of metres; `--noconstrain_vertical_velocity` turns that off for hilly
-routes or accurate (RTK) altitude.
+`--constrain_vertical_velocity` adds a level-road prior (near-zero vertical velocity while moving).
+It holds the height when single-solution GPS altitude wanders tens of metres; leave it off for
+hilly routes or accurate (RTK) altitude.
 
 To compare against [KF-GINS](https://github.com/i2Nav-WHU/KF-GINS) and
 [INSLIB](https://github.com/jnz/INSLIB), run them on the same record. Each script fetches and
