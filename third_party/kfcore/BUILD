@@ -17,6 +17,5 @@ cc_library(
         "linalg.h",
         "miniblas.h",
     ],
-    includes = ["."],
     linkopts = ["-lm"],
 )
