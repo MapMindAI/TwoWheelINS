@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Copyright 2026 MapMind
-# SPDX-License-Identifier: GPL-2.0-only
+# SPDX-License-Identifier: BSD-3-Clause
 # Runs KF-GINS (https://github.com/i2Nav-WHU/KF-GINS, GPL-3.0) on a MOKUKU record and writes
 # output/<record>_kfgins.tum. KF-GINS is fetched and built under output/benchmark, never committed.
 #

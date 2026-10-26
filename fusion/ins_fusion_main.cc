@@ -1,5 +1,5 @@
 // Copyright 2026 MapMind
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: BSD-3-Clause
 
 // Runs InsFusion on a MOKUKU text record and writes the IMU pose in UTM (easting, northing,
 // altitude) for every IMU sample after initialization, in TUM format: t_s x y z qx qy qz qw.
@@ -100,15 +100,14 @@ int Run(const std::string& record_path, const std::string& output_path) {
            << std::setprecision(4) << " " << utm.x() << " " << utm.y() << " " << utm.z() << " "
            << fix.satellite_count << "\n";
   }
-  const ikfom::ins::StateIkfom& state = fusion.state();
   std::cout << "wrote " << pose_count << " poses to " << output_path << " (UTM zone "
             << *fusion.utm_zone() << ")\n"
             << "gps horizontal innovation (m) over " << gps_horizontal_innovation.size()
             << " fixes: median " << Percentile(gps_horizontal_innovation, 0.5) << ", p95 "
             << Percentile(gps_horizontal_innovation, 0.95) << ", max "
             << Percentile(gps_horizontal_innovation, 1.0) << "\n"
-            << "final bias: gyroscope " << state.bg.transpose() << ", accelerometer "
-            << state.ba.transpose() << "\n";
+            << "final bias: gyroscope " << fusion.gyroscope_bias().transpose() << ", accelerometer "
+            << fusion.accelerometer_bias().transpose() << "\n";
   return 0;
 }
 

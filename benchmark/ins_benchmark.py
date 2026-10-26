@@ -1,5 +1,5 @@
 # Copyright 2026 MapMind
-# SPDX-License-Identifier: GPL-2.0-only
+# SPDX-License-Identifier: BSD-3-Clause
 """Runs KF-GINS or INSLIB on a MOKUKU record and writes a TUM trajectory for
 fusion/trajectory_viewer.html. Called by run_kfgins.sh / run_inslib.sh, which fetch and build the
 library first.

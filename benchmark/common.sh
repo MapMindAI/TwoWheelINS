@@ -1,5 +1,5 @@
 # Copyright 2026 MapMind
-# SPDX-License-Identifier: GPL-2.0-only
+# SPDX-License-Identifier: BSD-3-Clause
 # Shared setup for run_kfgins.sh and run_inslib.sh (sourced, not run).
 
 set -euo pipefail

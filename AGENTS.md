@@ -8,9 +8,9 @@ into a 6-DoF pose estimate. See `README.md` for the directory tree and build com
 
 | Path | Contents |
 |---|---|
-| `ikfom/` | C++17 iterated error-state Kalman filter on manifolds: `toolkit/` (MTK + esekfom, header-only), `backend/` (`ikf_ins`: IMU process model, pose/velocity measurements) |
 | `common/` | Shared C++ helpers: `math/` (so3/se3 Jacobians, covariance, UTM projection), `sensor/` (IMU, GPS, wheel-speed data), `reader/` (MOKUKU text record reader), `simulation/` (simulated IMU data with ground truth) |
-| `fusion/` | `InsFusion` (IMU + GPS on `ikf_ins`; wheel speed detects standstill), `ins_fusion_main` (runs it on a record, writes TUM poses in UTM), `trajectory_viewer.html` (TUM viewer: 3D via WebGL over satellite imagery, 2D map via Leaflet) |
+| `fusion/` | `KfcoreIns` (15-state error-state INS on the KFCore UDU filter), `InsFusion` (IMU + GPS on `KfcoreIns`; wheel speed detects standstill), `ins_fusion_main` (runs it on a record, writes TUM poses in UTM), `trajectory_viewer.html` (TUM viewer: 3D via WebGL over satellite imagery, 2D map via Leaflet) |
+| `third_party/kfcore/` | KFCore UDU Kalman filter (C, unmodified; BSD-3-Clause + attribution clause) |
 | `MODULE.bazel` | All external deps (Bazel Central Registry); commit `MODULE.bazel.lock` with it |
 | `benchmark/` | `run_kfgins.sh` / `run_inslib.sh`: fetch, build and run KF-GINS (GPL-3.0) / INSLIB (AGPL-3.0) on a record under `output/benchmark/`; `ins_benchmark.py` converts the record and writes TUM |
 | `toolchain/` | aarch64 platform + cross-compile toolchain (`--config=aarch64`) |
@@ -20,8 +20,8 @@ into a 6-DoF pose estimate. See `README.md` for the directory tree and build com
 ## 1. Language and portability
 
 * New filter / fusion code that will ship to the embedded target is **C11** (`.c`/`.h`, `cc_library` with C sources only). No heap allocation in the per-sample path, no C++ or glog dependency, fixed-size arrays sized at compile time.
-* `ikfom/` is the C++ reference. Use it to prototype and to cross-check C ports in tests; don't add embedded-only constraints to it.
-* Every C module gets a `cc_test` (gtest is fine on the host side) that compares against the reference or against simulated ground truth.
+* Every C module gets a `cc_test` (gtest is fine on the host side) that compares against a dense reference (e.g. Eigen) or against simulated ground truth.
+* The ikfom C++ filter was removed after release v0.1.0 (GPL-2.0); don't bring its code back.
 
 ## 2. Self-contained dependencies
 
@@ -29,11 +29,11 @@ into a 6-DoF pose estimate. See `README.md` for the directory tree and build com
 * Bazel 9 has no native C/C++ rules: every BUILD file loads `cc_library`/`cc_test` from `@rules_cc//cc:defs.bzl`.
 * Need a helper from another codebase? Copy the minimal subset into `common/` (no protobuf or unrelated transitive deps) and give it its own `BUILD` target.
 * Don't reference other private repositories by name in code, docs, or commit messages.
-* The repo is open source under GPL-2.0. New MapMind files start with:
-  `// Copyright <year> MapMind` and `// SPDX-License-Identifier: GPL-2.0-only`.
-  Only add dependencies whose license is GPL-2.0 compatible (e.g. not Apache-2.0).
-* `benchmark/` fetches KF-GINS and INSLIB at run time only. Their licenses are not GPL-2.0-compatible: never vendor, link or copy their code into the repo.
-* Third-party code keeps its original copyright and license notice; add a "Modified by MapMind" line instead of replacing it (see `ikfom/toolkit/README.md`).
+* The repo is open source under BSD-3-Clause. New MapMind files start with:
+  `// Copyright <year> MapMind` and `// SPDX-License-Identifier: BSD-3-Clause`.
+  Only add permissive dependencies (BSD, MIT, Apache-2.0, MPL-2.0); no GPL, LGPL or AGPL code.
+* `benchmark/` fetches KF-GINS (GPL-3.0) and INSLIB (AGPL-3.0) at run time only: never vendor, link or copy their code into the repo.
+* Third-party code keeps its original copyright and license notice; add a "Modified by MapMind" line instead of replacing it (see `third_party/kfcore/README.md`). KFCore requires the acknowledgment "This product includes KFCore, developed by Jan Zwiener" in every redistribution; keep it in `README.md`.
 
 ## 3. Build and test before opening a PR
 
@@ -63,4 +63,4 @@ into a 6-DoF pose estimate. See `README.md` for the directory tree and build com
 
 ## 7. Simplest design that solves the concrete problem
 
-No speculative abstraction layers, plugin points, or config knobs. No compatibility shims — change every call site in the same PR. Prefer full English names; keep standard short forms (`imu`, `gps`, `ins`, `ikfom`, `ecef`, `enu`, `_ns`).
+No speculative abstraction layers, plugin points, or config knobs. No compatibility shims — change every call site in the same PR. Prefer full English names; keep standard short forms (`imu`, `gps`, `ins`, `ecef`, `enu`, `_ns`).

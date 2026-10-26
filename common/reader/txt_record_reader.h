@@ -1,5 +1,5 @@
 // Copyright 2026 MapMind
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: BSD-3-Clause
 
 #ifndef COMMON_READER_TXT_RECORD_READER_H_
 #define COMMON_READER_TXT_RECORD_READER_H_

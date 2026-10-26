@@ -1,5 +1,5 @@
 // Copyright 2026 MapMind
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: BSD-3-Clause
 
 #ifndef COMMON_SENSOR_IMU_DATA_H_
 #define COMMON_SENSOR_IMU_DATA_H_

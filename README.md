@@ -3,17 +3,19 @@
 IMU + GPS inertial navigation (INS) fusion for a two-wheel platform: estimate the 6-DoF pose from
 data recorded with MOKUKU.
 
-The fusion core is an iterated error-state Kalman filter on manifolds (`ikfom/`). Production code
-is meant to be ported to an embedded target, so new filter code is written in C (C11); the C++
-`ikfom/` reference implementation and tests are kept for development and validation.
+The fusion core is a 15-state error-state INS after [INSLIB](https://github.com/jnz/INSLIB)'s
+design on the float, static-memory UDU Kalman filter from [KFCore](https://github.com/jnz/KFCore)
+(`third_party/kfcore/`). Production code is meant to be ported to an embedded target, so new filter
+code is written in C (C11).
+
+The previous iterated Kalman filter on manifolds (ikfom, GPL-2.0) is in release
+[v0.1.0](https://github.com/MapMindAI/TwoWheelINS/releases/tag/v0.1.0).
 
 ## Layout
 
 ```
-├── ikfom/            # iterated Kalman filter on manifolds (C++ reference)
-│   ├── toolkit/      # MTK + esekfom (header-only), adapted from IKFoM; see its README for licensing
-│   └── backend/      # ikf_ins: IMU/GPS state (pos, rot, vel, biases, gravity) and measurement models
-├── fusion/           # InsFusion (IMU + GPS on ikf_ins, wheel speed for standstill), ins_fusion_main, WebGL trajectory viewer
+├── fusion/           # KfcoreIns (error-state INS on KFCore), InsFusion (IMU + GPS, wheel speed for standstill), ins_fusion_main, WebGL trajectory viewer
+├── third_party/      # vendored code: KFCore UDU Kalman filter (C)
 ├── benchmark/        # run KF-GINS / INSLIB on a record for comparison (fetched at run time)
 ├── common/           # shared helpers: so3/se3 Jacobians, covariance and UTM projection (math/), sensor data types (sensor/), record reader (reader/), IMU simulation (simulation/)
 ├── toolchain/        # aarch64 platform + cross-compile cc_toolchain
@@ -63,5 +65,6 @@ every push to `main` and every pull request (`.github/workflows/ci.yml`).
 
 ## License
 
-GPL-2.0 (`LICENSE`). `ikfom/toolkit/` is adapted from IKFoM and MTK and keeps their original
-notices; see `ikfom/toolkit/README.md`.
+BSD-3-Clause (`LICENSE`). `third_party/kfcore/` is KFCore (BSD-3-Clause with an
+attribution clause, `third_party/kfcore/LICENSE`): This product includes KFCore, developed by Jan
+Zwiener.
