@@ -3,7 +3,9 @@
 
 // Runs InsFusion on a MOKUKU text record and writes the IMU pose in UTM (easting, northing,
 // altitude) for every IMU sample after initialization, in TUM format: t_s x y z qx qy qz qw.
-// A leading "# UTM zone <number><N|S>" comment lets fusion/trajectory_viewer.html put it on a map.
+// A leading "# UTM zone <number><N|S>" comment lets fusion/trajectory_viewer.html put it on a map;
+// trailing "# gps t_s easting_m northing_m altitude_m satellites" comments carry the record's GPS
+// fixes for the viewer to overlay.
 //
 // Usage: ins_fusion_main <record> <output.tum>
 
@@ -15,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include "common/math/geodesy.h"
 #include "common/reader/txt_record_reader.h"
 #include "fusion/ins_fusion.h"
 
@@ -86,6 +89,16 @@ int Run(const std::string& record_path, const std::string& output_path) {
   if (!fusion.initialized()) {
     std::cerr << "vehicle never moves fast enough to initialize heading\n";
     return 1;
+  }
+  for (const sensor::GpsData& fix : gps) {
+    if (fix.latitude_deg == 0.0 && fix.longitude_deg == 0.0) {
+      continue;
+    }
+    const Eigen::Vector3d utm = math::GeodeticToUtm(
+        Eigen::Vector3d(fix.latitude_deg, fix.longitude_deg, fix.altitude_m), *fusion.utm_zone());
+    output << "# gps " << std::setprecision(6) << 1e-9 * static_cast<double>(fix.timestamp_ns)
+           << std::setprecision(4) << " " << utm.x() << " " << utm.y() << " " << utm.z() << " "
+           << fix.satellite_count << "\n";
   }
   const ikfom::ins::StateIkfom& state = fusion.state();
   std::cout << "wrote " << pose_count << " poses to " << output_path << " (UTM zone "

@@ -21,6 +21,7 @@ cc_binary(
     srcs = ["ins_fusion_main.cc"],
     deps = [
         ":ins_fusion",
+        "//common/math:geodesy",
         "//common/reader:txt_record_reader",
     ],
 )

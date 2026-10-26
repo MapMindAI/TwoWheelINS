@@ -18,6 +18,10 @@
 
 namespace mapmind::fusion {
 
+// GPS position covariance (UTM easting, northing, altitude; m^2) for a fix from
+// `satellite_count` satellites: > 20 is a fix solution, 11-20 float, fewer single.
+Eigen::Matrix3d GpsCovariance(int satellite_count);
+
 // IMU + GPS INS on the ikfom filter: IMU propagation and GPS position updates.
 //
 // Feed samples in timestamp order. The first second of IMU data must be (nearly) static: its mean
@@ -55,7 +59,7 @@ class InsFusion {
 
   bool IsUsable(const sensor::GpsData& gps) const;
   void StartYawHypotheses(const sensor::GpsData& gps);
-  void UpdateYawHypotheses(const Eigen::Vector3d& position);
+  void UpdateYawHypotheses(const Eigen::Vector3d& position, const Eigen::Matrix3d& gps_covariance);
 
   Filter filter_;
   bool initialized_ = false;

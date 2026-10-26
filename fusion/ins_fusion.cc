@@ -29,10 +29,20 @@ constexpr int kYawSelectionFixes = 10;
 constexpr int kMinSatellites = 4;
 constexpr int kMaxIterations = 4;
 
-constexpr double kGpsHorizontalStd = 1.5;  // m
-constexpr double kGpsVerticalStd = 10.0;   // m
-constexpr double kAccelerometerStd = 1.0;  // m/s^2, dominated by vibration
-constexpr double kGyroscopeStd = 0.05;     // rad/s
+// GPS fix status from the satellite count (the receiver's own status flag is not used).
+constexpr int kMinFixSatellites = 21;
+constexpr int kMinFloatSatellites = 11;
+// RTK-style accuracy for fix and float solutions (m).
+constexpr double kGpsFixHorizontalStd = 0.05;
+constexpr double kGpsFixVerticalStd = 0.1;
+constexpr double kGpsFloatHorizontalStd = 0.5;
+constexpr double kGpsFloatVerticalStd = 1.0;
+// Single solutions: std = scale / (satellites - 3). Fix-to-fix scatter in mobili_2 falls this way
+// with the satellite count; the scale keeps 1.5 m / 10 m at the median of 8 satellites.
+constexpr double kGpsSingleHorizontalStdScale = 7.5;  // m
+constexpr double kGpsSingleVerticalStdScale = 50.0;   // m
+constexpr double kAccelerometerStd = 1.0;             // m/s^2, dominated by vibration
+constexpr double kGyroscopeStd = 0.05;                // rad/s
 constexpr double kAccelerometerBiasStd = 1e-2;
 constexpr double kGyroscopeBiasStd = 1e-3;
 
@@ -42,15 +52,21 @@ Eigen::Vector3d Geodetic(const sensor::GpsData& gps) {
   return {gps.latitude_deg, gps.longitude_deg, gps.altitude_m};
 }
 
-const Eigen::Matrix3d& GpsNoise() {
-  static const Eigen::Matrix3d noise =
-      Eigen::Vector3d(kGpsHorizontalStd, kGpsHorizontalStd, kGpsVerticalStd)
-          .cwiseAbs2()
-          .asDiagonal();
-  return noise;
-}
-
 }  // namespace
+
+Eigen::Matrix3d GpsCovariance(int satellite_count) {
+  double horizontal = kGpsFixHorizontalStd;
+  double vertical = kGpsFixVerticalStd;
+  if (satellite_count < kMinFloatSatellites) {
+    const double redundancy = std::max(satellite_count - 3, 1);
+    horizontal = kGpsSingleHorizontalStdScale / redundancy;
+    vertical = kGpsSingleVerticalStdScale / redundancy;
+  } else if (satellite_count < kMinFixSatellites) {
+    horizontal = kGpsFloatHorizontalStd;
+    vertical = kGpsFloatVerticalStd;
+  }
+  return Eigen::Vector3d(horizontal, horizontal, vertical).cwiseAbs2().asDiagonal();
+}
 
 InsFusion::InsFusion() {
   double limit[StateIkfom::DOF];
@@ -111,9 +127,9 @@ std::optional<Eigen::Vector3d> InsFusion::AddGps(const sensor::GpsData& gps) {
   std::optional<Eigen::Vector3d> innovation;
   if (initialized_) {
     innovation = position - Eigen::Vector3d(filter_.get_x().pos);
-    filter_.update_iterated_dyn(position, GpsNoise(), kGpsPosition);
+    filter_.update_iterated_dyn(position, GpsCovariance(gps.satellite_count), kGpsPosition);
   } else if (!hypotheses_.empty()) {
-    UpdateYawHypotheses(position);
+    UpdateYawHypotheses(position, GpsCovariance(gps.satellite_count));
   } else {
     StartYawHypotheses(gps);
   }
@@ -135,9 +151,10 @@ void InsFusion::StartYawHypotheses(const sensor::GpsData& gps) {
   }
 
   Eigen::Matrix<double, StateIkfom::DOF, 1> initial_std;
-  initial_std << Eigen::Vector3d::Constant(kGpsHorizontalStd), Eigen::Vector3d(0.05, 0.05, 0.3),
-      Eigen::Vector3d::Constant(1.0), Eigen::Vector3d::Constant(0.02),
-      Eigen::Vector3d::Constant(0.3), Eigen::Vector2d::Constant(1e-3);
+  initial_std << GpsCovariance(gps.satellite_count).diagonal().cwiseSqrt(),
+      Eigen::Vector3d(0.05, 0.05, 0.3), Eigen::Vector3d::Constant(1.0),
+      Eigen::Vector3d::Constant(0.02), Eigen::Vector3d::Constant(0.3),
+      Eigen::Vector2d::Constant(1e-3);
   for (int i = 0; i < kYawHypotheses; ++i) {
     YawHypothesis& hypothesis = hypotheses_.emplace_back(YawHypothesis{filter_});
     StateIkfom& state = hypothesis.filter.mutable_state();
@@ -153,15 +170,16 @@ void InsFusion::StartYawHypotheses(const sensor::GpsData& gps) {
   hypothesis_fix_count_ = 0;
 }
 
-void InsFusion::UpdateYawHypotheses(const Eigen::Vector3d& position) {
+void InsFusion::UpdateYawHypotheses(const Eigen::Vector3d& position,
+                                    const Eigen::Matrix3d& gps_covariance) {
   for (YawHypothesis& hypothesis : hypotheses_) {
     const int position_index = hypothesis.filter.get_x().pos.IDX;
     const Eigen::Matrix3d innovation_covariance =
-        hypothesis.filter.get_P().block<3, 3>(position_index, position_index) + GpsNoise();
+        hypothesis.filter.get_P().block<3, 3>(position_index, position_index) + gps_covariance;
     const Eigen::Vector3d innovation = position - Eigen::Vector3d(hypothesis.filter.get_x().pos);
     hypothesis.cost += innovation.dot(innovation_covariance.ldlt().solve(innovation)) +
                        std::log(innovation_covariance.determinant());
-    hypothesis.filter.update_iterated_dyn(position, GpsNoise(), kGpsPosition);
+    hypothesis.filter.update_iterated_dyn(position, gps_covariance, kGpsPosition);
   }
   if (++hypothesis_fix_count_ < kYawSelectionFixes) {
     return;
