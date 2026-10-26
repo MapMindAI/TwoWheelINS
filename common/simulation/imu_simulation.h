@@ -1,5 +1,5 @@
 // Copyright 2022 MapMind
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: BSD-3-Clause
 
 #ifndef COMMON_SIMULATION_IMU_SIMULATION_H_
 #define COMMON_SIMULATION_IMU_SIMULATION_H_

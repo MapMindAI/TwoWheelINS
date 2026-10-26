@@ -1,13 +1,13 @@
 // Copyright 2026 MapMind
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: BSD-3-Clause
 
 // Runs InsFusion on a MOKUKU text record and writes the IMU pose in UTM (easting, northing,
 // altitude) for every IMU sample after initialization, in TUM format: t_s x y z qx qy qz qw.
-// A leading "# UTM zone <number><N|S>" comment lets fusion/trajectory_viewer.html put it on a map;
+// A leading "# UTM zone <number><N|S>" comment lets tools/trajectory_viewer.html put it on a map;
 // trailing "# gps t_s easting_m northing_m altitude_m satellites" comments carry the record's GPS
 // fixes for the viewer to overlay.
 //
-// Usage: ins_fusion_main <record> <output.tum>
+// Usage: ins_fusion_main [--constrain_vertical_velocity] <record> <output.tum>
 
 #include <algorithm>
 #include <fstream>
@@ -17,9 +17,14 @@
 #include <string>
 #include <vector>
 
+#include <gflags/gflags.h>
+
 #include "common/math/geodesy.h"
 #include "common/reader/txt_record_reader.h"
 #include "fusion/ins_fusion.h"
+
+DEFINE_bool(constrain_vertical_velocity, false,
+            "level-road prior: near-zero world vertical velocity while moving");
 
 namespace mapmind::fusion {
 namespace {
@@ -51,7 +56,7 @@ int Run(const std::string& record_path, const std::string& output_path) {
   output << std::fixed;
 
   // Merge the streams by timestamp; a measurement is applied before the IMU sample it precedes.
-  InsFusion fusion;
+  InsFusion fusion(FLAGS_constrain_vertical_velocity);
   const std::vector<sensor::GpsData>& gps = record->gps;
   const std::vector<sensor::WheelSpeedData>& wheel_speed = record->wheel_speed;
   size_t gps_index = 0;
@@ -100,15 +105,14 @@ int Run(const std::string& record_path, const std::string& output_path) {
            << std::setprecision(4) << " " << utm.x() << " " << utm.y() << " " << utm.z() << " "
            << fix.satellite_count << "\n";
   }
-  const ikfom::ins::StateIkfom& state = fusion.state();
   std::cout << "wrote " << pose_count << " poses to " << output_path << " (UTM zone "
             << *fusion.utm_zone() << ")\n"
             << "gps horizontal innovation (m) over " << gps_horizontal_innovation.size()
             << " fixes: median " << Percentile(gps_horizontal_innovation, 0.5) << ", p95 "
             << Percentile(gps_horizontal_innovation, 0.95) << ", max "
             << Percentile(gps_horizontal_innovation, 1.0) << "\n"
-            << "final bias: gyroscope " << state.bg.transpose() << ", accelerometer "
-            << state.ba.transpose() << "\n";
+            << "final bias: gyroscope " << fusion.gyroscope_bias().transpose() << ", accelerometer "
+            << fusion.accelerometer_bias().transpose() << "\n";
   return 0;
 }
 
@@ -116,8 +120,10 @@ int Run(const std::string& record_path, const std::string& output_path) {
 }  // namespace mapmind::fusion
 
 int main(int argc, char** argv) {
+  gflags::SetUsageMessage("[--constrain_vertical_velocity] <record> <output.tum>");
+  gflags::ParseCommandLineFlags(&argc, &argv, /*remove_flags=*/true);
   if (argc != 3) {
-    std::cerr << "usage: " << argv[0] << " <record> <output.tum>\n";
+    gflags::ShowUsageWithFlagsRestrict(argv[0], "fusion/ins_fusion_main");
     return 1;
   }
   return mapmind::fusion::Run(argv[1], argv[2]);

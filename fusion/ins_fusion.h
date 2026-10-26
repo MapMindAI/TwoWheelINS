@@ -1,5 +1,5 @@
 // Copyright 2026 MapMind
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: BSD-3-Clause
 
 #ifndef FUSION_INS_FUSION_H_
 #define FUSION_INS_FUSION_H_
@@ -13,28 +13,25 @@
 #include "common/sensor/gps_data.h"
 #include "common/sensor/imu_data.h"
 #include "common/sensor/wheel_speed_data.h"
-#include "ikfom/backend/ikf_ins.h"
+#include "fusion/kfcore_ins.h"
 #include "sophus/se3.hpp"
 
 namespace mapmind::fusion {
 
-// GPS position covariance (UTM easting, northing, altitude; m^2) for a fix from
-// `satellite_count` satellites: > 20 is a fix solution, 11-20 float, fewer single.
-Eigen::Matrix3d GpsCovariance(int satellite_count);
-
-// IMU + GPS INS on the ikfom filter: IMU propagation and GPS position updates, plus velocity
+// IMU + GPS INS on the KfcoreIns filter: IMU propagation and GPS position updates, plus velocity
 // constraints for a road vehicle: zero velocity while the wheel speed reads zero (GPS is ignored
-// then, since a parked receiver drifts) and near-zero vertical velocity while moving.
+// then, since a parked receiver drifts) and, if `constrain_vertical_velocity`, near-zero vertical
+// velocity while moving.
 // A GPS altitude whose innovation fails a chi-square gate is dropped.
 //
 // Feed samples in timestamp order. The first second of IMU data must be (nearly) static: its mean
-// specific force levels roll and pitch. Yaw needs no knowledge of the IMU mount: once two GPS
-// fixes give the velocity, filters start at evenly spaced yaw hypotheses and, after a few more
-// fixes, the one whose GPS innovations fit best is kept. Yaw shows in the GPS track only while the
-// vehicle accelerates (speeds up, brakes or turns).
+// specific force levels roll and pitch, its mean angular velocity is the initial gyroscope bias.
+// Yaw needs no knowledge of the IMU mount: once two GPS fixes give the velocity, filters start at
+// evenly spaced yaw hypotheses and, after a few more fixes, the one whose GPS innovations fit best
+// is kept. Yaw shows in the GPS track only while the vehicle speeds up, brakes or turns.
 class InsFusion {
  public:
-  InsFusion();
+  explicit InsFusion(bool constrain_vertical_velocity = true);
 
   void AddImu(const sensor::ImuData& imu);
   // Returns the innovation (fix minus predicted position, UTM, m) if the fix was applied to the
@@ -49,28 +46,30 @@ class InsFusion {
   Sophus::SE3d pose() const;
   // UTM zone of the first usable GPS fix, used for all fixes.
   std::optional<int> utm_zone() const { return utm_zone_; }
-  const ikfom::ins::StateIkfom& state() const { return filter_.get_x(); }
+  const Eigen::Vector3d& gyroscope_bias() const { return filter_.gyroscope_bias(); }
+  const Eigen::Vector3d& accelerometer_bias() const { return filter_.accelerometer_bias(); }
 
  private:
-  using Filter = esekfom::esekf<ikfom::ins::StateIkfom, ikfom::ImuNoiseIkfom::DOF, ikfom::ImuIkfom>;
-
   struct YawHypothesis {
-    Filter filter;
+    KfcoreIns filter;
     // sum over fixes of the negative log-likelihood of the innovation (up to a constant)
     double cost = 0.0;
   };
 
   bool IsUsable(const sensor::GpsData& gps) const;
+  // UTM position of `gps` relative to origin_ (m).
+  Eigen::Vector3d LocalPosition(const sensor::GpsData& gps) const;
   void StartYawHypotheses(const sensor::GpsData& gps);
   void UpdateYawHypotheses(const Eigen::Vector3d& position, const Eigen::Matrix3d& gps_covariance);
   // Returns the innovation (UTM, m).
   Eigen::Vector3d UpdateGpsPosition(const Eigen::Vector3d& position,
-                                    Eigen::Matrix3d gps_covariance);
+                                    const Eigen::Matrix3d& gps_covariance);
   bool IsStationary(int64_t timestamp_ns) const;
   // Zero-velocity update while stationary, level-road prior while moving.
   void ConstrainVelocity(int64_t timestamp_ns);
 
-  Filter filter_;
+  bool constrain_vertical_velocity_;
+  KfcoreIns filter_;
   bool initialized_ = false;
   std::vector<YawHypothesis> hypotheses_;
   int hypothesis_fix_count_ = 0;
@@ -80,9 +79,15 @@ class InsFusion {
   int64_t last_imu_timestamp_ns_ = 0;
   int static_sample_count_ = 0;
   Eigen::Vector3d static_acc_sum_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d static_gyro_sum_ = Eigen::Vector3d::Zero();
   std::optional<Sophus::SO3d> attitude_;
+  // mean angular velocity while static (rad/s, body)
+  Eigen::Vector3d gyroscope_bias_ = Eigen::Vector3d::Zero();
 
   std::optional<int> utm_zone_;
+  // UTM position of the first usable fix: the filter runs in UTM axes relative to it, so its state
+  // holds metres from the start rather than ~1e6 m northings.
+  Eigen::Vector3d origin_ = Eigen::Vector3d::Zero();
   std::optional<sensor::GpsData> last_gps_;
   int dropped_altitude_count_ = 0;
   std::optional<sensor::WheelSpeedData> last_wheel_speed_;

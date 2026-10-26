@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Copyright 2026 MapMind
-# SPDX-License-Identifier: GPL-2.0-only
+# SPDX-License-Identifier: BSD-3-Clause
 # Runs INSLIB (https://github.com/jnz/INSLIB, AGPL-3.0) on a MOKUKU record and writes
 # output/<record>_inslib.tum. INSLIB is fetched and built under output/benchmark, never committed.
 #

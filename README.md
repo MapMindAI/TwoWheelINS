@@ -3,17 +3,20 @@
 IMU + GPS inertial navigation (INS) fusion for a two-wheel platform: estimate the 6-DoF pose from
 data recorded with MOKUKU.
 
-The fusion core is an iterated error-state Kalman filter on manifolds (`ikfom/`). Production code
-is meant to be ported to an embedded target, so new filter code is written in C (C11); the C++
-`ikfom/` reference implementation and tests are kept for development and validation.
+The fusion core is a 15-state error-state INS after [INSLIB](https://github.com/jnz/INSLIB)'s
+design on the float, static-memory UDU Kalman filter from [KFCore](https://github.com/jnz/KFCore)
+(`third_party/kfcore/`). Production code is meant to be ported to an embedded target, so new filter
+code is written in C (C11).
+
+The previous iterated Kalman filter on manifolds (ikfom, GPL-2.0) is in release
+[v0.1.0](https://github.com/MapMindAI/TwoWheelINS/releases/tag/v0.1.0).
 
 ## Layout
 
 ```
-├── ikfom/            # iterated Kalman filter on manifolds (C++ reference)
-│   ├── toolkit/      # MTK + esekfom (header-only), adapted from IKFoM; see its README for licensing
-│   └── backend/      # ikf_ins: IMU/GPS state (pos, rot, vel, biases, gravity) and measurement models
-├── fusion/           # InsFusion (IMU + GPS on ikf_ins, wheel speed for standstill), ins_fusion_main, WebGL trajectory viewer
+├── fusion/           # KfcoreIns (error-state INS on KFCore), InsFusion (IMU + GPS, wheel speed for standstill), ins_fusion_main
+├── tools/            # WebGL/Leaflet trajectory viewer for TUM output
+├── third_party/      # vendored code: KFCore UDU Kalman filter (C)
 ├── benchmark/        # run KF-GINS / INSLIB on a record for comparison (fetched at run time)
 ├── common/           # shared helpers: so3/se3 Jacobians, covariance and UTM projection (math/), sensor data types (sensor/), record reader (reader/), IMU simulation (simulation/)
 ├── toolchain/        # aarch64 platform + cross-compile cc_toolchain
@@ -36,7 +39,7 @@ bazel build --config=aarch64 //...     # cross-compile for arm64 (needs gcc-aarc
 ```
 
 Run the fusion on a MOKUKU text record; it writes the IMU pose (UTM easting, northing, altitude)
-for every IMU sample in TUM format (`t_s x y z qx qy qz qw`). Open `fusion/trajectory_viewer.html`
+for every IMU sample in TUM format (`t_s x y z qx qy qz qw`). Open `tools/trajectory_viewer.html`
 in a browser and pick or drop the file: it draws the trajectory in 3D (WebGL) over Esri World Imagery
 and on a 2D map (Leaflet). The imagery needs network; without it the 3D view falls back to a grid.
 The output also carries the record's GPS fixes as `# gps t_s easting northing altitude satellites`
@@ -46,6 +49,10 @@ comments; the viewer overlays them, coloured by satellite count.
 bazel build //fusion:ins_fusion_main
 bazel-bin/fusion/ins_fusion_main data/mobili_2.record output/mobili_2.tum
 ```
+
+`--constrain_vertical_velocity` adds a level-road prior (near-zero vertical velocity while moving).
+It holds the height when single-solution GPS altitude wanders tens of metres; leave it off for
+hilly routes or accurate (RTK) altitude.
 
 To compare against [KF-GINS](https://github.com/i2Nav-WHU/KF-GINS) and
 [INSLIB](https://github.com/jnz/INSLIB), run them on the same record. Each script fetches and
@@ -63,5 +70,6 @@ every push to `main` and every pull request (`.github/workflows/ci.yml`).
 
 ## License
 
-GPL-2.0 (`LICENSE`). `ikfom/toolkit/` is adapted from IKFoM and MTK and keeps their original
-notices; see `ikfom/toolkit/README.md`.
+BSD-3-Clause (`LICENSE`). `third_party/kfcore/` is KFCore (BSD-3-Clause with an
+attribution clause, `third_party/kfcore/LICENSE`): This product includes KFCore, developed by Jan
+Zwiener.
