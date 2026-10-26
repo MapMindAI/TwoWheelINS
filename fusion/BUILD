@@ -51,6 +51,7 @@ cc_binary(
         ":ins_fusion",
         "//common/math:geodesy",
         "//common/reader:txt_record_reader",
+        "@gflags",
     ],
 )
 

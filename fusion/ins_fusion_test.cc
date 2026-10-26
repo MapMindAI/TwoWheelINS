@@ -57,6 +57,7 @@ struct Simulation {
   std::function<Motion(double)> motion = Ride;
   double duration_s = 40.0;
   int satellite_count = 8;
+  bool constrain_vertical_velocity = true;
   // Returns the GPS position error (UTM, m) at `t`, or nullopt to drop the fix.
   std::function<std::optional<Eigen::Vector3d>(double)> gps_error = [](double) {
     return Eigen::Vector3d::Zero();
@@ -84,7 +85,7 @@ Errors Simulate(const Simulation& simulation, double error_from_s, double error_
   const Eigen::Vector3d origin_utm = math::GeodeticToUtm(origin, zone);
   const Eigen::Vector3d gravity_world(0.0, 0.0, -kGravity);
 
-  InsFusion fusion;
+  InsFusion fusion(simulation.constrain_vertical_velocity);
   Errors errors;
   double yaw = 0.7;
   Eigen::Vector3d position = Eigen::Vector3d::Zero();
@@ -195,6 +196,10 @@ TEST(InsFusion, IgnoresGpsAltitudeDriftOnLevelRoad) {
     return Eigen::Vector3d(0.0, 0.0, std::max(t - 20.0, 0.0));
   };
   EXPECT_LT(Simulate(simulation, 20.0, 40.0).max_height, 8.0);
+
+  // without the level-road prior the height follows the GPS altitude
+  simulation.constrain_vertical_velocity = false;
+  EXPECT_GT(Simulate(simulation, 20.0, 40.0).max_height, 12.0);
 }
 
 TEST(InsFusion, DropsAltitudeOutliers) {

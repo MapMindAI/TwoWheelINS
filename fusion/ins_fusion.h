@@ -20,7 +20,8 @@ namespace mapmind::fusion {
 
 // IMU + GPS INS on the KfcoreIns filter: IMU propagation and GPS position updates, plus velocity
 // constraints for a road vehicle: zero velocity while the wheel speed reads zero (GPS is ignored
-// then, since a parked receiver drifts) and near-zero vertical velocity while moving.
+// then, since a parked receiver drifts) and, if `constrain_vertical_velocity`, near-zero vertical
+// velocity while moving.
 // A GPS altitude whose innovation fails a chi-square gate is dropped.
 //
 // Feed samples in timestamp order. The first second of IMU data must be (nearly) static: its mean
@@ -30,7 +31,7 @@ namespace mapmind::fusion {
 // is kept. Yaw shows in the GPS track only while the vehicle speeds up, brakes or turns.
 class InsFusion {
  public:
-  InsFusion();
+  explicit InsFusion(bool constrain_vertical_velocity = true);
 
   void AddImu(const sensor::ImuData& imu);
   // Returns the innovation (fix minus predicted position, UTM, m) if the fix was applied to the
@@ -56,6 +57,8 @@ class InsFusion {
   };
 
   bool IsUsable(const sensor::GpsData& gps) const;
+  // UTM position of `gps` relative to origin_ (m).
+  Eigen::Vector3d LocalPosition(const sensor::GpsData& gps) const;
   void StartYawHypotheses(const sensor::GpsData& gps);
   void UpdateYawHypotheses(const Eigen::Vector3d& position, const Eigen::Matrix3d& gps_covariance);
   // Returns the innovation (UTM, m).
@@ -65,6 +68,7 @@ class InsFusion {
   // Zero-velocity update while stationary, level-road prior while moving.
   void ConstrainVelocity(int64_t timestamp_ns);
 
+  bool constrain_vertical_velocity_;
   KfcoreIns filter_;
   bool initialized_ = false;
   std::vector<YawHypothesis> hypotheses_;
@@ -81,6 +85,9 @@ class InsFusion {
   Eigen::Vector3d gyroscope_bias_ = Eigen::Vector3d::Zero();
 
   std::optional<int> utm_zone_;
+  // UTM position of the first usable fix: the filter runs in UTM axes relative to it, so its state
+  // holds metres from the start rather than ~1e6 m northings.
+  Eigen::Vector3d origin_ = Eigen::Vector3d::Zero();
   std::optional<sensor::GpsData> last_gps_;
   int dropped_altitude_count_ = 0;
   std::optional<sensor::WheelSpeedData> last_wheel_speed_;

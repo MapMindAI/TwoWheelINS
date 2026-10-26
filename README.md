@@ -14,7 +14,8 @@ The previous iterated Kalman filter on manifolds (ikfom, GPL-2.0) is in release
 ## Layout
 
 ```
-├── fusion/           # KfcoreIns (error-state INS on KFCore), InsFusion (IMU + GPS, wheel speed for standstill), ins_fusion_main, WebGL trajectory viewer
+├── fusion/           # KfcoreIns (error-state INS on KFCore), InsFusion (IMU + GPS, wheel speed for standstill), ins_fusion_main
+├── tools/            # WebGL/Leaflet trajectory viewer for TUM output
 ├── third_party/      # vendored code: KFCore UDU Kalman filter (C)
 ├── benchmark/        # run KF-GINS / INSLIB on a record for comparison (fetched at run time)
 ├── common/           # shared helpers: so3/se3 Jacobians, covariance and UTM projection (math/), sensor data types (sensor/), record reader (reader/), IMU simulation (simulation/)
@@ -38,7 +39,7 @@ bazel build --config=aarch64 //...     # cross-compile for arm64 (needs gcc-aarc
 ```
 
 Run the fusion on a MOKUKU text record; it writes the IMU pose (UTM easting, northing, altitude)
-for every IMU sample in TUM format (`t_s x y z qx qy qz qw`). Open `fusion/trajectory_viewer.html`
+for every IMU sample in TUM format (`t_s x y z qx qy qz qw`). Open `tools/trajectory_viewer.html`
 in a browser and pick or drop the file: it draws the trajectory in 3D (WebGL) over Esri World Imagery
 and on a 2D map (Leaflet). The imagery needs network; without it the 3D view falls back to a grid.
 The output also carries the record's GPS fixes as `# gps t_s easting northing altitude satellites`
@@ -48,6 +49,10 @@ comments; the viewer overlays them, coloured by satellite count.
 bazel build //fusion:ins_fusion_main
 bazel-bin/fusion/ins_fusion_main data/mobili_2.record output/mobili_2.tum
 ```
+
+While moving, the fusion assumes a level road (near-zero vertical velocity), since single-solution
+GPS altitude wanders tens of metres; `--noconstrain_vertical_velocity` turns that off for hilly
+routes or accurate (RTK) altitude.
 
 To compare against [KF-GINS](https://github.com/i2Nav-WHU/KF-GINS) and
 [INSLIB](https://github.com/jnz/INSLIB), run them on the same record. Each script fetches and

@@ -57,7 +57,8 @@ Eigen::Matrix<double, kRows, KfcoreIns::kStateSize> Selection(int index) {
 
 }  // namespace
 
-InsFusion::InsFusion() : filter_(kProcessNoise, kGravity) {}
+InsFusion::InsFusion(bool constrain_vertical_velocity)
+    : constrain_vertical_velocity_(constrain_vertical_velocity), filter_(kProcessNoise, kGravity) {}
 
 void InsFusion::AddImu(const sensor::ImuData& imu) {
   if (static_sample_count_ == 0) {
@@ -95,14 +96,19 @@ bool InsFusion::IsUsable(const sensor::GpsData& gps) const {
   return gps.satellite_count >= kMinSatellites && !repeated;
 }
 
+Eigen::Vector3d InsFusion::LocalPosition(const sensor::GpsData& gps) const {
+  return math::GeodeticToUtm(Geodetic(gps), *utm_zone_) - origin_;
+}
+
 std::optional<Eigen::Vector3d> InsFusion::AddGps(const sensor::GpsData& gps) {
   if (!IsUsable(gps)) {
     return std::nullopt;
   }
   if (!utm_zone_) {
     utm_zone_ = math::UtmZone(gps.longitude_deg);
+    origin_ = math::GeodeticToUtm(Geodetic(gps), *utm_zone_);
   }
-  const Eigen::Vector3d position = math::GeodeticToUtm(Geodetic(gps), *utm_zone_);
+  const Eigen::Vector3d position = LocalPosition(gps);
   std::optional<Eigen::Vector3d> innovation;
   if (initialized_) {
     if (!IsStationary(gps.timestamp_ns)) {
@@ -148,6 +154,9 @@ void InsFusion::ConstrainVelocity(int64_t timestamp_ns) {
                       Eigen::Vector3d::Constant(kZeroVelocityStd * kZeroVelocityStd));
     return;
   }
+  if (!constrain_vertical_velocity_) {
+    return;
+  }
   filter_.Update<1>(Eigen::Matrix<double, 1, 1>(-filter_.velocity().z()),
                     Selection<1>(StateIndex::kVelocity + 2),
                     Eigen::Matrix<double, 1, 1>(kVerticalVelocityStd * kVerticalVelocityStd));
@@ -158,9 +167,8 @@ void InsFusion::StartYawHypotheses(const sensor::GpsData& gps) {
     return;
   }
   const double dt = Seconds(gps.timestamp_ns - last_gps_->timestamp_ns);
-  const Eigen::Vector3d position = math::GeodeticToUtm(Geodetic(gps), *utm_zone_);
-  const Eigen::Vector3d displacement =
-      position - math::GeodeticToUtm(Geodetic(*last_gps_), *utm_zone_);
+  const Eigen::Vector3d position = LocalPosition(gps);
+  const Eigen::Vector3d displacement = position - LocalPosition(*last_gps_);
   if (dt < kMinStartIntervalSeconds || dt > kMaxStartIntervalSeconds ||
       displacement.head<2>().norm() / dt < kMinStartSpeedMps) {
     return;
@@ -208,7 +216,7 @@ void InsFusion::AddWheelSpeed(const sensor::WheelSpeedData& wheel_speed) {
 }
 
 Sophus::SE3d InsFusion::pose() const {
-  return Sophus::SE3d(filter_.rotation(), filter_.position());
+  return Sophus::SE3d(filter_.rotation(), origin_ + filter_.position());
 }
 
 }  // namespace mapmind::fusion
