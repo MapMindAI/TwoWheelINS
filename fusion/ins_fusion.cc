@@ -24,8 +24,27 @@ constexpr int kYawHypotheses = 12;
 constexpr int kYawSelectionFixes = 10;
 constexpr int kMinSatellites = 4;
 
-// accelerometer (dominated by vibration), gyroscope, accelerometer bias, gyroscope bias densities
-constexpr KfcoreIns::ProcessNoise kProcessNoise = {0.2, 0.01, 2e-3, 2e-4};
+// Accelerometer and gyroscope densities are the vibration measured on mobili_2; the position,
+// velocity and attitude random walks are INSLIB's defaults.
+constexpr KfcoreIns::ProcessNoise kProcessNoise = {/*accelerometer=*/0.2,
+                                                   /*gyroscope=*/0.01,
+                                                   /*accelerometer_bias=*/2e-3,
+                                                   /*gyroscope_bias=*/2e-4,
+                                                   /*position=*/0.01,
+                                                   /*velocity=*/5e-4,
+                                                   /*attitude=*/1e-3};
+// covariance prediction period (INSLIB's default 20 Hz); the strapdown runs every IMU sample
+constexpr double kCovariancePeriodSeconds = 0.05;
+// A longer IMU gap is not integrated: the filter restarts yaw selection, keeping attitude and
+// gyroscope bias (INSLIB's max_prediction_time_sec).
+constexpr double kMaxImuGapSeconds = 0.5;
+
+// Initial standard deviations of a yaw hypothesis; position comes from the fix's covariance.
+constexpr double kInitialVelocityStd = 1.0;           // m/s
+constexpr double kInitialRollPitchStd = 0.05;         // rad
+constexpr double kInitialYawStd = 0.3;                // rad, about half the hypothesis spacing
+constexpr double kInitialAccelerometerBiasStd = 0.3;  // m/s^2
+constexpr double kInitialGyroscopeBiasStd = 0.02;     // rad/s
 
 // Stationary below this wheel speed (the wheel sensor reports whole km/h).
 constexpr double kStationarySpeedMps = 0.1;
@@ -57,7 +76,8 @@ Eigen::Matrix<double, kRows, KfcoreIns::kStateSize> Selection(int index) {
 }  // namespace
 
 InsFusion::InsFusion(bool constrain_vertical_velocity)
-    : constrain_vertical_velocity_(constrain_vertical_velocity), filter_(kProcessNoise, kGravity) {}
+    : constrain_vertical_velocity_(constrain_vertical_velocity),
+      filter_(kProcessNoise, kGravity, kCovariancePeriodSeconds) {}
 
 void InsFusion::AddImu(const sensor::ImuData& imu) {
   if (static_sample_count_ == 0) {
@@ -65,7 +85,14 @@ void InsFusion::AddImu(const sensor::ImuData& imu) {
     last_imu_timestamp_ns_ = imu.timestamp_ns;
   }
   const double dt = Seconds(imu.timestamp_ns - last_imu_timestamp_ns_);
+  if (dt < 0.0) {
+    return;
+  }
   last_imu_timestamp_ns_ = imu.timestamp_ns;
+  if (dt > kMaxImuGapSeconds) {
+    Rearm();
+    return;
+  }
 
   if (initialized_) {
     filter_.Predict(imu.linear_acceleration, imu.angular_velocity, dt);
@@ -175,8 +202,10 @@ void InsFusion::StartYawHypotheses(const sensor::GpsData& gps) {
 
   KfcoreIns::StateVector initial_std;
   initial_std << sensor::GpsCovariance(gps.satellite_count).diagonal().cwiseSqrt(),
-      Eigen::Vector3d::Constant(1.0), Eigen::Vector3d(0.05, 0.05, 0.3),
-      Eigen::Vector3d::Constant(0.3), Eigen::Vector3d::Constant(0.02);
+      Eigen::Vector3d::Constant(kInitialVelocityStd),
+      Eigen::Vector3d(kInitialRollPitchStd, kInitialRollPitchStd, kInitialYawStd),
+      Eigen::Vector3d::Constant(kInitialAccelerometerBiasStd),
+      Eigen::Vector3d::Constant(kInitialGyroscopeBiasStd);
   for (int i = 0; i < kYawHypotheses; ++i) {
     YawHypothesis& hypothesis = hypotheses_.emplace_back(YawHypothesis{filter_});
     hypothesis.filter.Reset(position,
@@ -208,6 +237,17 @@ void InsFusion::UpdateYawHypotheses(const Eigen::Vector3d& position,
                 ->filter;
   hypotheses_.clear();
   initialized_ = true;
+}
+
+void InsFusion::Rearm() {
+  if (!initialized_ && hypotheses_.empty()) {
+    return;
+  }
+  const KfcoreIns& filter = initialized_ ? filter_ : hypotheses_.front().filter;
+  attitude_ = filter.rotation();
+  gyroscope_bias_ = filter.gyroscope_bias();
+  hypotheses_.clear();
+  initialized_ = false;
 }
 
 void InsFusion::AddWheelSpeed(const sensor::WheelSpeedData& wheel_speed) {

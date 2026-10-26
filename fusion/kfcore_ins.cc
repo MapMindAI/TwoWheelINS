@@ -9,13 +9,19 @@ namespace mapmind::fusion {
 
 namespace {
 
-// IMU noise inputs: accelerometer, gyroscope, accelerometer bias walk, gyroscope bias walk.
-constexpr int kNoiseSize = 12;
+// Noise inputs: accelerometer, gyroscope, accelerometer bias walk, gyroscope bias walk, then
+// position, velocity and attitude random walk.
+constexpr int kNoiseSize = 21;
+// A period that is due within this fraction still predicts, so IMU timestamp jitter cannot halve
+// the prediction rate.
+constexpr double kCovariancePeriodTolerance = 0.01;
 
 }  // namespace
 
-KfcoreIns::KfcoreIns(const ProcessNoise& process_noise, double gravity)
-    : process_noise_(process_noise), gravity_(0.0, 0.0, -gravity) {}
+KfcoreIns::KfcoreIns(const ProcessNoise& process_noise, double gravity, double covariance_period)
+    : process_noise_(process_noise),
+      gravity_(0.0, 0.0, -gravity),
+      covariance_period_(covariance_period) {}
 
 void KfcoreIns::Reset(const Eigen::Vector3d& position, const Sophus::SO3d& rotation,
                       const Eigen::Vector3d& velocity, const Eigen::Vector3d& gyroscope_bias,
@@ -27,6 +33,7 @@ void KfcoreIns::Reset(const Eigen::Vector3d& position, const Sophus::SO3d& rotat
   gyroscope_bias_ = gyroscope_bias;
   u_.setIdentity();
   d_ = initial_std.cwiseAbs2().cast<float>();
+  pending_covariance_dt_ = 0.0;
 }
 
 void KfcoreIns::Predict(const Eigen::Vector3d& acceleration,
@@ -38,6 +45,21 @@ void KfcoreIns::Predict(const Eigen::Vector3d& acceleration,
   const Eigen::Vector3d specific_force = acceleration - accelerometer_bias_;
   const Eigen::Vector3d specific_force_world = rotation * specific_force;
 
+  pending_covariance_dt_ += dt;
+  if (pending_covariance_dt_ >= (1.0 - kCovariancePeriodTolerance) * covariance_period_) {
+    PredictCovariance(rotation, specific_force_world, pending_covariance_dt_);
+    pending_covariance_dt_ = 0.0;
+  }
+
+  // nominal state: trapezoidal position
+  const Eigen::Vector3d previous_velocity = velocity_;
+  velocity_ += (specific_force_world + gravity_) * dt;
+  position_ += 0.5 * dt * (previous_velocity + velocity_);
+  rotation_ = rotation_ * Sophus::SO3d::exp((angular_velocity - gyroscope_bias_) * dt);
+}
+
+void KfcoreIns::PredictCovariance(const Eigen::Matrix3d& rotation,
+                                  const Eigen::Vector3d& specific_force_world, double dt) {
   // error transition, first order: Phi = I + F dt
   Eigen::Matrix<float, kStateSize, kStateSize> transition;
   transition.setIdentity();
@@ -53,22 +75,18 @@ void KfcoreIns::Predict(const Eigen::Vector3d& acceleration,
   noise_input.block<3, 3>(kAttitude, 3) = rotation.cast<float>();
   noise_input.block<3, 3>(kAccelerometerBias, 6).setIdentity();
   noise_input.block<3, 3>(kGyroscopeBias, 9).setIdentity();
+  noise_input.block<9, 9>(kPosition, 12).setIdentity();
+  const auto density = [dt](double value) {
+    return Eigen::Vector3f::Constant(static_cast<float>(value * value * dt));
+  };
   Eigen::Matrix<float, kNoiseSize, 1> noise_variance;
-  noise_variance << Eigen::Vector3f::Constant(process_noise_.accelerometer *
-                                              process_noise_.accelerometer * dt),
-      Eigen::Vector3f::Constant(process_noise_.gyroscope * process_noise_.gyroscope * dt),
-      Eigen::Vector3f::Constant(process_noise_.accelerometer_bias *
-                                process_noise_.accelerometer_bias * dt),
-      Eigen::Vector3f::Constant(process_noise_.gyroscope_bias * process_noise_.gyroscope_bias * dt);
+  noise_variance << density(process_noise_.accelerometer), density(process_noise_.gyroscope),
+      density(process_noise_.accelerometer_bias), density(process_noise_.gyroscope_bias),
+      density(process_noise_.position), density(process_noise_.velocity),
+      density(process_noise_.attitude);
   // The error state is zero after every correction, so only the covariance is predicted.
   kalman_udu_predict(nullptr, u_.data(), d_.data(), transition.data(), noise_input.data(),
                      noise_variance.data(), kStateSize, kNoiseSize);
-
-  // nominal state: trapezoidal position
-  const Eigen::Vector3d previous_velocity = velocity_;
-  velocity_ += (specific_force_world + gravity_) * dt;
-  position_ += 0.5 * dt * (previous_velocity + velocity_);
-  rotation_ = rotation_ * Sophus::SO3d::exp((angular_velocity - gyroscope_bias_) * dt);
 }
 
 template <int kRows>

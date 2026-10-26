@@ -14,7 +14,9 @@ namespace mapmind::fusion {
 // integrated in double, the error covariance is kept as float U-D factors (P = U diag(d) U^T),
 // predicted with Thornton's and updated with Bierman's algorithm. Gravity is constant along world
 // -z; Earth rotation is ignored. Truth = nominal + error, with the attitude error in the world
-// frame (rotation_true = exp(error) * rotation). Fixed-size storage only, no heap.
+// frame (rotation_true = exp(error) * rotation). The nominal state is integrated every IMU sample;
+// the covariance only once `covariance_period` has elapsed, over the elapsed time (INSLIB's
+// kalman_update_dt_sec). Fixed-size storage only, no heap.
 class KfcoreIns {
  public:
   enum StateIndex {
@@ -34,9 +36,14 @@ class KfcoreIns {
     double gyroscope;           // rad/s/sqrt(Hz)
     double accelerometer_bias;  // m/s^3/sqrt(Hz)
     double gyroscope_bias;      // rad/s^2/sqrt(Hz)
+    // random walk added on top of the IMU-driven terms
+    double position;  // m/sqrt(s)
+    double velocity;  // m/s/sqrt(s)
+    double attitude;  // rad/sqrt(s)
   };
 
-  KfcoreIns(const ProcessNoise& process_noise, double gravity);
+  // `covariance_period` (s): 0 predicts the covariance every sample.
+  KfcoreIns(const ProcessNoise& process_noise, double gravity, double covariance_period);
 
   // Sets the nominal state (zero accelerometer bias) and a diagonal covariance from `initial_std`.
   void Reset(const Eigen::Vector3d& position, const Sophus::SO3d& rotation,
@@ -63,10 +70,15 @@ class KfcoreIns {
   const Eigen::Vector3d& gyroscope_bias() const { return gyroscope_bias_; }
 
  private:
+  void PredictCovariance(const Eigen::Matrix3d& rotation,
+                         const Eigen::Vector3d& specific_force_world, double dt);
   void Correct(const Eigen::Matrix<float, kStateSize, 1>& error);
 
   ProcessNoise process_noise_;
   Eigen::Vector3d gravity_;
+  double covariance_period_;
+  // IMU time not yet propagated into the covariance (s)
+  double pending_covariance_dt_ = 0.0;
 
   Eigen::Vector3d position_ = Eigen::Vector3d::Zero();
   Sophus::SO3d rotation_;

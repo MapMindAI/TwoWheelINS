@@ -61,10 +61,14 @@ struct Simulation {
   std::function<std::optional<Eigen::Vector3d>(double)> gps_error = [](double) {
     return Eigen::Vector3d::Zero();
   };
+  // Returns true to drop the IMU sample at `t`.
+  std::function<bool(double)> imu_dropped = [](double) { return false; };
 };
 
 struct Errors {
   int pose_count = 0;
+  // times the filter fell back from initialized to yaw selection
+  int rearm_count = 0;
   std::optional<int> utm_zone;
   // after kSettledSeconds, in [error_from_s, error_to_s)
   double max_position = 0.0;
@@ -86,6 +90,7 @@ Errors Simulate(const Simulation& simulation, double error_from_s, double error_
 
   InsFusion fusion(simulation.constrain_vertical_velocity);
   Errors errors;
+  bool was_initialized = false;
   double yaw = 0.7;
   Eigen::Vector3d position = Eigen::Vector3d::Zero();
   for (int i = 0; i <= simulation.duration_s * 100; ++i) {
@@ -121,10 +126,16 @@ Errors Simulate(const Simulation& simulation, double error_from_s, double error_
     if (i % kWheelEvery == 0) {
       fusion.AddWheelSpeed({timestamp_ns, motion.speed});
     }
-    fusion.AddImu(
-        {timestamp_ns, world_from_body.inverse() * (acceleration_world - gravity_world),
-         world_from_body.inverse() * Eigen::Vector3d(0, 0, motion.yaw_rate) + gyroscope_bias});
+    if (!simulation.imu_dropped(t)) {
+      fusion.AddImu(
+          {timestamp_ns, world_from_body.inverse() * (acceleration_world - gravity_world),
+           world_from_body.inverse() * Eigen::Vector3d(0, 0, motion.yaw_rate) + gyroscope_bias});
+    }
 
+    if (was_initialized && !fusion.initialized()) {
+      ++errors.rearm_count;
+    }
+    was_initialized = fusion.initialized();
     if (!fusion.initialized()) {
       continue;
     }
@@ -183,6 +194,16 @@ TEST(InsFusion, IgnoresGpsAltitudeDriftOnLevelRoad) {
   // without the level-road prior the height follows the GPS altitude
   simulation.constrain_vertical_velocity = false;
   EXPECT_GT(Simulate(simulation, 20.0, 40.0).max_height, 12.0);
+}
+
+TEST(InsFusion, RestartsYawSelectionAfterImuGap) {
+  Simulation simulation;
+  simulation.duration_s = 60.0;
+  simulation.imu_dropped = [](double t) { return t >= 25.0 && t < 26.0; };
+  const Errors errors = Simulate(simulation, 45.0, 60.0);
+  EXPECT_EQ(errors.rearm_count, 1);
+  EXPECT_LT(errors.max_position, 0.5);
+  EXPECT_LT(errors.max_rotation, 0.15);
 }
 
 TEST(InsFusion, DropsAltitudeOutliers) {

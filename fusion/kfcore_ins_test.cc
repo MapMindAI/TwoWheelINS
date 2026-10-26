@@ -9,10 +9,10 @@ namespace mapmind::fusion {
 namespace {
 
 constexpr double kGravity = 9.81;
-constexpr KfcoreIns::ProcessNoise kProcessNoise = {0.2, 0.01, 2e-3, 2e-4};
+constexpr KfcoreIns::ProcessNoise kProcessNoise = {0.2, 0.01, 2e-3, 2e-4, 0.01, 5e-4, 1e-3};
 
-KfcoreIns MakeFilter() {
-  KfcoreIns filter(kProcessNoise, kGravity);
+KfcoreIns MakeFilter(double covariance_period = 0.0) {
+  KfcoreIns filter(kProcessNoise, kGravity, covariance_period);
   KfcoreIns::StateVector initial_std;
   initial_std << Eigen::Vector3d(1.5, 1.5, 10.0), Eigen::Vector3d::Constant(1.0),
       Eigen::Vector3d(0.05, 0.05, 0.3), Eigen::Vector3d::Constant(0.3),
@@ -22,39 +22,83 @@ KfcoreIns MakeFilter() {
   return filter;
 }
 
+// Dense covariance prediction over `dt` at the filter's current state.
+KfcoreIns::Covariance DensePrediction(const KfcoreIns& filter, const Eigen::Vector3d& acceleration,
+                                      double dt) {
+  const Eigen::Matrix3d rotation = filter.rotation().matrix();
+  const Eigen::Vector3d specific_force_world =
+      rotation * (acceleration - filter.accelerometer_bias());
+  KfcoreIns::Covariance transition = KfcoreIns::Covariance::Identity();
+  transition.block<3, 3>(KfcoreIns::kPosition, KfcoreIns::kVelocity).diagonal().setConstant(dt);
+  transition.block<3, 3>(KfcoreIns::kVelocity, KfcoreIns::kAttitude) =
+      -Sophus::SO3d::hat(specific_force_world) * dt;
+  transition.block<3, 3>(KfcoreIns::kVelocity, KfcoreIns::kAccelerometerBias) = -rotation * dt;
+  transition.block<3, 3>(KfcoreIns::kAttitude, KfcoreIns::kGyroscopeBias) = -rotation * dt;
+  const auto variance = [dt](double density) { return density * density * dt; };
+  KfcoreIns::StateVector noise;
+  noise << Eigen::Vector3d::Constant(variance(kProcessNoise.position)),
+      Eigen::Vector3d::Constant(variance(kProcessNoise.accelerometer) +
+                                variance(kProcessNoise.velocity)),
+      Eigen::Vector3d::Constant(variance(kProcessNoise.gyroscope) +
+                                variance(kProcessNoise.attitude)),
+      Eigen::Vector3d::Constant(variance(kProcessNoise.accelerometer_bias)),
+      Eigen::Vector3d::Constant(variance(kProcessNoise.gyroscope_bias));
+  return transition * filter.covariance() * transition.transpose() +
+         KfcoreIns::Covariance(noise.asDiagonal());
+}
+
+// float U-D factors: relative accuracy ~1e-5 of the largest variance
+void ExpectCovarianceNear(const KfcoreIns::Covariance& actual,
+                          const KfcoreIns::Covariance& expected) {
+  EXPECT_LT((actual - expected).cwiseAbs().maxCoeff(), 1e-4 * expected.maxCoeff());
+}
+
 TEST(KfcoreIns, PredictsCovarianceLikeDenseFilter) {
   KfcoreIns filter = MakeFilter();
   // correlate the states first
   filter.Update<3>(Eigen::Vector3d(0.5, -0.2, 1.0), Eigen::Matrix<double, 3, 15>::Random(),
                    Eigen::Vector3d(0.5, 0.5, 2.0));
-  const KfcoreIns::Covariance covariance = filter.covariance();
-  const Eigen::Matrix3d rotation = filter.rotation().matrix();
   const Eigen::Vector3d acceleration(0.3, -0.1, 9.9);
-  const Eigen::Vector3d specific_force_world =
-      rotation * (acceleration - filter.accelerometer_bias());
   constexpr double kDt = 0.01;
-
-  KfcoreIns::Covariance transition = KfcoreIns::Covariance::Identity();
-  transition.block<3, 3>(KfcoreIns::kPosition, KfcoreIns::kVelocity).diagonal().setConstant(kDt);
-  transition.block<3, 3>(KfcoreIns::kVelocity, KfcoreIns::kAttitude) =
-      -Sophus::SO3d::hat(specific_force_world) * kDt;
-  transition.block<3, 3>(KfcoreIns::kVelocity, KfcoreIns::kAccelerometerBias) = -rotation * kDt;
-  transition.block<3, 3>(KfcoreIns::kAttitude, KfcoreIns::kGyroscopeBias) = -rotation * kDt;
-  KfcoreIns::Covariance noise = KfcoreIns::Covariance::Zero();
-  const Eigen::Matrix3d identity = Eigen::Matrix3d::Identity();
-  noise.block<3, 3>(KfcoreIns::kVelocity, KfcoreIns::kVelocity) =
-      kProcessNoise.accelerometer * kProcessNoise.accelerometer * kDt * identity;
-  noise.block<3, 3>(KfcoreIns::kAttitude, KfcoreIns::kAttitude) =
-      kProcessNoise.gyroscope * kProcessNoise.gyroscope * kDt * identity;
-  noise.block<3, 3>(KfcoreIns::kAccelerometerBias, KfcoreIns::kAccelerometerBias) =
-      kProcessNoise.accelerometer_bias * kProcessNoise.accelerometer_bias * kDt * identity;
-  noise.block<3, 3>(KfcoreIns::kGyroscopeBias, KfcoreIns::kGyroscopeBias) =
-      kProcessNoise.gyroscope_bias * kProcessNoise.gyroscope_bias * kDt * identity;
-  const KfcoreIns::Covariance expected = transition * covariance * transition.transpose() + noise;
+  const KfcoreIns::Covariance expected = DensePrediction(filter, acceleration, kDt);
 
   filter.Predict(acceleration, Eigen::Vector3d(0.01, 0.02, 0.3), kDt);
-  // float U-D factors: relative accuracy ~1e-5 of the largest variance
-  EXPECT_LT((filter.covariance() - expected).cwiseAbs().maxCoeff(), 1e-4 * expected.maxCoeff());
+  ExpectCovarianceNear(filter.covariance(), expected);
+}
+
+TEST(KfcoreIns, AddsProcessNoiseLikeDenseFilter) {
+  // tight initial covariance, so the process noise dominates the prediction
+  KfcoreIns filter(kProcessNoise, kGravity, /*covariance_period=*/0.0);
+  filter.Reset(Eigen::Vector3d::Zero(), Sophus::SO3d::rotX(0.2), Eigen::Vector3d(4.0, -2.0, 0.0),
+               Eigen::Vector3d::Zero(), KfcoreIns::StateVector::Constant(1e-4));
+  const Eigen::Vector3d acceleration(0.3, -0.1, 9.9);
+  constexpr double kDt = 0.1;
+  const KfcoreIns::Covariance expected = DensePrediction(filter, acceleration, kDt);
+
+  filter.Predict(acceleration, Eigen::Vector3d::Zero(), kDt);
+  const KfcoreIns::StateVector variance = filter.covariance().diagonal();
+  EXPECT_LT(
+      ((variance - expected.diagonal()).array() / expected.diagonal().array()).abs().maxCoeff(),
+      1e-3);
+}
+
+TEST(KfcoreIns, PredictsCovarianceOncePerPeriod) {
+  KfcoreIns filter = MakeFilter(/*covariance_period=*/0.05);
+  filter.Update<3>(Eigen::Vector3d(0.5, -0.2, 1.0), Eigen::Matrix<double, 3, 15>::Random(),
+                   Eigen::Vector3d(0.5, 0.5, 2.0));
+  const KfcoreIns::Covariance covariance = filter.covariance();
+  const Eigen::Vector3d acceleration(0.3, -0.1, 9.9);
+  // no rotation, so the transition is the same at every sample
+  const Eigen::Vector3d angular_velocity = Eigen::Vector3d::Zero();
+  constexpr double kDt = 0.02;
+
+  filter.Predict(acceleration, angular_velocity, kDt);
+  filter.Predict(acceleration, angular_velocity, kDt);
+  EXPECT_EQ(filter.covariance(), covariance);
+  // the third sample completes the period: one prediction over all three
+  const KfcoreIns::Covariance expected = DensePrediction(filter, acceleration, 3 * kDt);
+  filter.Predict(acceleration, angular_velocity, kDt);
+  ExpectCovarianceNear(filter.covariance(), expected);
 }
 
 TEST(KfcoreIns, UpdatesLikeDenseFilter) {
@@ -74,7 +118,7 @@ TEST(KfcoreIns, UpdatesLikeDenseFilter) {
   const Sophus::SO3d rotation = filter.rotation();
 
   ASSERT_TRUE(filter.Update<3>(residual, jacobian, variance));
-  EXPECT_LT((filter.covariance() - expected).cwiseAbs().maxCoeff(), 1e-4 * expected.maxCoeff());
+  ExpectCovarianceNear(filter.covariance(), expected);
   EXPECT_TRUE(
       (filter.position() - position).isApprox(error.segment<3>(KfcoreIns::kPosition), 1e-4));
   EXPECT_TRUE(
