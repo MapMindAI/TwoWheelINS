@@ -29,6 +29,7 @@ namespace mapmind::fusion {
 // Yaw needs no knowledge of the IMU mount: once two GPS fixes give the velocity, filters start at
 // evenly spaced yaw hypotheses and, after a few more fixes, the one whose GPS innovations fit best
 // is kept. Yaw shows in the GPS track only while the vehicle speeds up, brakes or turns.
+// After an IMU gap the yaw selection restarts from the last attitude.
 class InsFusion {
  public:
   explicit InsFusion(bool constrain_vertical_velocity = true);
@@ -64,6 +65,8 @@ class InsFusion {
   // Returns the innovation (UTM, m).
   Eigen::Vector3d UpdateGpsPosition(const Eigen::Vector3d& position,
                                     const Eigen::Matrix3d& gps_covariance);
+  // Back to yaw selection, keeping the attitude and gyroscope bias.
+  void Rearm();
   bool IsStationary(int64_t timestamp_ns) const;
   // Zero-velocity update while stationary, level-road prior while moving.
   void ConstrainVelocity(int64_t timestamp_ns);
