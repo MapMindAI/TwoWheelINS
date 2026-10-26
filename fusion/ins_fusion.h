@@ -22,7 +22,10 @@ namespace mapmind::fusion {
 // `satellite_count` satellites: > 20 is a fix solution, 11-20 float, fewer single.
 Eigen::Matrix3d GpsCovariance(int satellite_count);
 
-// IMU + GPS INS on the ikfom filter: IMU propagation and GPS position updates.
+// IMU + GPS INS on the ikfom filter: IMU propagation and GPS position updates, plus velocity
+// constraints for a road vehicle: zero velocity while the wheel speed reads zero (GPS is ignored
+// then, since a parked receiver drifts) and near-zero vertical velocity while moving.
+// A GPS altitude whose innovation fails a chi-square gate is dropped.
 //
 // Feed samples in timestamp order. The first second of IMU data must be (nearly) static: its mean
 // specific force levels roll and pitch. Yaw needs no knowledge of the IMU mount: once two GPS
@@ -37,7 +40,7 @@ class InsFusion {
   // Returns the innovation (fix minus predicted position, UTM, m) if the fix was applied to the
   // selected filter.
   std::optional<Eigen::Vector3d> AddGps(const sensor::GpsData& gps);
-  // Not fused in this version.
+  // Only used to detect standstill.
   void AddWheelSpeed(const sensor::WheelSpeedData& wheel_speed);
 
   // True once a yaw hypothesis is selected; pose() is valid from then on.
@@ -60,6 +63,12 @@ class InsFusion {
   bool IsUsable(const sensor::GpsData& gps) const;
   void StartYawHypotheses(const sensor::GpsData& gps);
   void UpdateYawHypotheses(const Eigen::Vector3d& position, const Eigen::Matrix3d& gps_covariance);
+  // Returns the innovation (UTM, m).
+  Eigen::Vector3d UpdateGpsPosition(const Eigen::Vector3d& position,
+                                    Eigen::Matrix3d gps_covariance);
+  bool IsStationary(int64_t timestamp_ns) const;
+  // Zero-velocity update while stationary, level-road prior while moving.
+  void ConstrainVelocity(int64_t timestamp_ns);
 
   Filter filter_;
   bool initialized_ = false;
@@ -75,6 +84,8 @@ class InsFusion {
 
   std::optional<int> utm_zone_;
   std::optional<sensor::GpsData> last_gps_;
+  int dropped_altitude_count_ = 0;
+  std::optional<sensor::WheelSpeedData> last_wheel_speed_;
 };
 
 }  // namespace mapmind::fusion

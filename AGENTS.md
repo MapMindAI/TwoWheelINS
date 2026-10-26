@@ -10,7 +10,7 @@ into a 6-DoF pose estimate. See `README.md` for the directory tree and build com
 |---|---|
 | `ikfom/` | C++17 iterated error-state Kalman filter on manifolds: `toolkit/` (MTK + esekfom, header-only), `backend/` (`ikf_ins`: IMU process model, pose/velocity measurements) |
 | `common/` | Shared C++ helpers: `math/` (so3/se3 Jacobians, covariance, UTM projection), `sensor/` (IMU, GPS, wheel-speed data), `reader/` (MOKUKU text record reader), `simulation/` (simulated IMU data with ground truth) |
-| `fusion/` | `InsFusion` (IMU + GPS on `ikf_ins`), `ins_fusion_main` (runs it on a record, writes TUM poses in UTM), `trajectory_viewer.html` (TUM viewer: 3D via WebGL over satellite imagery, 2D map via Leaflet) |
+| `fusion/` | `InsFusion` (IMU + GPS on `ikf_ins`; wheel speed detects standstill), `ins_fusion_main` (runs it on a record, writes TUM poses in UTM), `trajectory_viewer.html` (TUM viewer: 3D via WebGL over satellite imagery, 2D map via Leaflet) |
 | `MODULE.bazel` | All external deps (Bazel Central Registry); commit `MODULE.bazel.lock` with it |
 | `benchmark/` | `run_kfgins.sh` / `run_inslib.sh`: fetch, build and run KF-GINS (GPL-3.0) / INSLIB (AGPL-3.0) on a record under `output/benchmark/`; `ins_benchmark.py` converts the record and writes TUM |
 | `toolchain/` | aarch64 platform + cross-compile toolchain (`--config=aarch64`) |

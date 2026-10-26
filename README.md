@@ -13,7 +13,7 @@ is meant to be ported to an embedded target, so new filter code is written in C 
 ├── ikfom/            # iterated Kalman filter on manifolds (C++ reference)
 │   ├── toolkit/      # MTK + esekfom (header-only), adapted from IKFoM; see its README for licensing
 │   └── backend/      # ikf_ins: IMU/GPS state (pos, rot, vel, biases, gravity) and measurement models
-├── fusion/           # InsFusion (IMU + GPS on ikf_ins), ins_fusion_main, WebGL trajectory viewer
+├── fusion/           # InsFusion (IMU + GPS on ikf_ins, wheel speed for standstill), ins_fusion_main, WebGL trajectory viewer
 ├── benchmark/        # run KF-GINS / INSLIB on a record for comparison (fetched at run time)
 ├── common/           # shared helpers: so3/se3 Jacobians, covariance and UTM projection (math/), sensor data types (sensor/), record reader (reader/), IMU simulation (simulation/)
 ├── toolchain/        # aarch64 platform + cross-compile cc_toolchain

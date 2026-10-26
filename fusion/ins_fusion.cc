@@ -16,7 +16,7 @@ namespace {
 
 using ikfom::ins::StateIkfom;
 
-enum MeasurementIndex { kGpsPosition = 0 };
+enum MeasurementIndex { kGpsPosition = 0, kWorldVelocity = 1 };
 
 constexpr double kGravity = 9.8099;
 constexpr double kStaticAlignmentSeconds = 1.0;
@@ -45,6 +45,24 @@ constexpr double kAccelerometerStd = 1.0;             // m/s^2, dominated by vib
 constexpr double kGyroscopeStd = 0.05;                // rad/s
 constexpr double kAccelerometerBiasStd = 1e-2;
 constexpr double kGyroscopeBiasStd = 1e-3;
+
+// Stationary below this wheel speed (the wheel sensor reports whole km/h).
+constexpr double kStationarySpeedMps = 0.1;
+constexpr double kMaxWheelSpeedAgeSeconds = 0.5;
+constexpr double kZeroVelocityStd = 0.05;  // m/s
+// Level-road prior while moving: world vertical velocity near zero. Single-solution altitude
+// wanders tens of metres on flat roads (a 70 m climb in mobili_2 with no change in IMU tilt), and
+// a body-frame constraint lets that through the poorly observed pitch and accelerometer bias.
+// Real slopes (0.5 m/s at 10 % and 5 m/s) still come through, lagged, from GPS.
+constexpr double kVerticalVelocityStd = 0.3;       // m/s
+constexpr double kUnconstrainedVelocityStd = 1e3;  // m/s
+// Altitude innovation gate (chi-square, 1 dof, 99.9 %): an outlier fix is applied without its
+// altitude. After this many dropped altitudes in a row the next one is applied, so a drifted
+// height recovers. Horizontal gating is not used: single-solution fixes stray far beyond their
+// covariance, and dropping them let the filter drift away in mobili_2.
+constexpr double kVerticalGate = 10.83;
+constexpr int kMaxDroppedAltitudes = 5;
+constexpr double kDroppedAltitudeVariance = 1e8;  // m^2
 
 double Seconds(int64_t duration_ns) { return 1e-9 * static_cast<double>(duration_ns); }
 
@@ -75,6 +93,8 @@ InsFusion::InsFusion() {
                    ikfom::ins::DVelocityFieldDw, kMaxIterations, limit);
   filter_.add_dyn_vec(ikfom::ins::PositionMeasurement, ikfom::ins::DPositionMeasurementDx,
                       ikfom::ins::DPositionMeasurementDv);
+  filter_.add_dyn_vec(ikfom::ins::WorldVelocityMeasurement, ikfom::ins::DWorldVelocityMeasurementDx,
+                      ikfom::ins::DWorldVelocityMeasurementDv);
 }
 
 void InsFusion::AddImu(const sensor::ImuData& imu) {
@@ -93,6 +113,7 @@ void InsFusion::AddImu(const sensor::ImuData& imu) {
   input.gyro = imu.angular_velocity;
   if (initialized_) {
     filter_.predict(dt, process_noise, input);
+    ConstrainVelocity(imu.timestamp_ns);
   } else if (!hypotheses_.empty()) {
     for (YawHypothesis& hypothesis : hypotheses_) {
       hypothesis.filter.predict(dt, process_noise, input);
@@ -126,8 +147,9 @@ std::optional<Eigen::Vector3d> InsFusion::AddGps(const sensor::GpsData& gps) {
   const Eigen::Vector3d position = math::GeodeticToUtm(Geodetic(gps), *utm_zone_);
   std::optional<Eigen::Vector3d> innovation;
   if (initialized_) {
-    innovation = position - Eigen::Vector3d(filter_.get_x().pos);
-    filter_.update_iterated_dyn(position, GpsCovariance(gps.satellite_count), kGpsPosition);
+    if (!IsStationary(gps.timestamp_ns)) {
+      innovation = UpdateGpsPosition(position, GpsCovariance(gps.satellite_count));
+    }
   } else if (!hypotheses_.empty()) {
     UpdateYawHypotheses(position, GpsCovariance(gps.satellite_count));
   } else {
@@ -135,6 +157,46 @@ std::optional<Eigen::Vector3d> InsFusion::AddGps(const sensor::GpsData& gps) {
   }
   last_gps_ = gps;
   return innovation;
+}
+
+Eigen::Vector3d InsFusion::UpdateGpsPosition(const Eigen::Vector3d& position,
+                                             Eigen::Matrix3d gps_covariance) {
+  const int altitude_index = filter_.get_x().pos.IDX + 2;
+  const Eigen::Vector3d innovation = position - Eigen::Vector3d(filter_.get_x().pos);
+  const double altitude_variance =
+      filter_.get_P()(altitude_index, altitude_index) + gps_covariance(2, 2);
+  if (innovation.z() * innovation.z() > kVerticalGate * altitude_variance &&
+      dropped_altitude_count_ < kMaxDroppedAltitudes) {
+    gps_covariance(2, 2) = kDroppedAltitudeVariance;
+    ++dropped_altitude_count_;
+  } else {
+    dropped_altitude_count_ = 0;
+  }
+  filter_.update_iterated_dyn(position, gps_covariance, kGpsPosition);
+  return innovation;
+}
+
+bool InsFusion::IsStationary(int64_t timestamp_ns) const {
+  return last_wheel_speed_ &&
+         Seconds(timestamp_ns - last_wheel_speed_->timestamp_ns) < kMaxWheelSpeedAgeSeconds &&
+         last_wheel_speed_->speed_mps < kStationarySpeedMps;
+}
+
+void InsFusion::ConstrainVelocity(int64_t timestamp_ns) {
+  if (IsStationary(timestamp_ns)) {
+    filter_.update_iterated_dyn(Eigen::Vector3d::Zero(),
+                                kZeroVelocityStd * kZeroVelocityStd * Eigen::Matrix3d::Identity(),
+                                kWorldVelocity);
+    return;
+  }
+  const Eigen::Vector3d velocity = filter_.get_x().vel;
+  filter_.update_iterated_dyn(
+      Eigen::Vector3d(velocity.x(), velocity.y(), 0.0),
+      Eigen::Vector3d(kUnconstrainedVelocityStd, kUnconstrainedVelocityStd, kVerticalVelocityStd)
+          .cwiseAbs2()
+          .asDiagonal()
+          .toDenseMatrix(),
+      kWorldVelocity);
 }
 
 void InsFusion::StartYawHypotheses(const sensor::GpsData& gps) {
@@ -192,7 +254,9 @@ void InsFusion::UpdateYawHypotheses(const Eigen::Vector3d& position,
   initialized_ = true;
 }
 
-void InsFusion::AddWheelSpeed(const sensor::WheelSpeedData& /*wheel_speed*/) {}
+void InsFusion::AddWheelSpeed(const sensor::WheelSpeedData& wheel_speed) {
+  last_wheel_speed_ = wheel_speed;
+}
 
 Sophus::SE3d InsFusion::pose() const {
   const StateIkfom& state = filter_.get_x();
