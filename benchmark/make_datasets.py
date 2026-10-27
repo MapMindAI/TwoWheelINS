@@ -24,9 +24,12 @@ Each dataset gets:
            by linear interpolation of gt.txt; no noise. Skipped where the two neighbouring
            ground-truth poses are more than MAX_GT_GAP_S apart.
   gt.txt   TUM world_from_imu, at most 100 Hz.
---images gets <name>.png for the wiki Benchmark-Datasets page: top-down view of the map point
-cloud (points above the trajectory + CEILING_CLEARANCE_M cut away; shaded by height if it has no
-colour) with the ground-truth trajectory in red, start green, end blue, 5 m scale bar.
+--images gets <group>.png per group of datasets (the name up to the first underscore) for the wiki
+Benchmark-Datasets page: one panel per dataset in name order, PANELS_PER_ROW per row at a common
+scale, each a top-down view of its own map point cloud within MAP_MARGIN_M of the trajectory
+(points above the trajectory + CEILING_CLEARANCE_M cut away; shaded by height if it has no colour)
+with the ground-truth trajectory in red, start green, end blue and a 10 m scale bar. Each dataset
+has its own map frame, so panels are not aligned with each other.
 
 Each dataset is checked against its ground truth: gravity (resting specific force rotated to the
 world, should be ~(0, 0, 9.8)) and the gyro integrated between ground-truth poses (relative
@@ -75,9 +78,11 @@ OUTPUT_PERIOD_S = 0.01  # 100 Hz
 TRAJECTORY_TRIM_S = 0.5
 GPS_PERIOD_S = 1.0
 MAX_GT_GAP_S = 2.0
-METERS_PER_PIXEL = 0.03
+MAX_PANEL_PIXELS = 700
+PANELS_PER_ROW = 3
+MAP_MARGIN_M = 5.0
 CEILING_CLEARANCE_M = 1.0
-SCALE_BAR_M = 5.0
+SCALE_BAR_M = 10.0
 
 
 def open_bag(bag_dir, topics):
@@ -380,10 +385,20 @@ def write_png(path, image):
                 chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
 
 
-def render_map(ply_path, world_from_map, gt, path):
+def group_name(name):
+    """Datasets are grouped by the name up to the first underscore (place or recorder)."""
+    return name.split("_")[0]
+
+
+def map_points(ply_path, world_from_map, gt):
+    """World points of the map within MAP_MARGIN_M of the trajectory, below the ceiling cut, and
+    their colours (shaded by height if the PLY has none)."""
     xyz, rgb = read_ascii_ply(ply_path)
     xyz = xyz @ world_from_map.T
-    keep = xyz[:, 2] < gt[:, 3].max() + CEILING_CLEARANCE_M
+    low = gt[:, 1:3].min(axis=0) - MAP_MARGIN_M
+    high = gt[:, 1:3].max(axis=0) + MAP_MARGIN_M
+    keep = np.all((xyz[:, :2] >= low) & (xyz[:, :2] <= high), axis=1) & \
+        (xyz[:, 2] < gt[:, 3].max() + CEILING_CLEARANCE_M)
     xyz = xyz[keep]
     if rgb is None:
         low_z, high_z = np.percentile(xyz[:, 2], [2, 98])
@@ -391,14 +406,19 @@ def render_map(ply_path, world_from_map, gt, path):
         rgb = np.repeat(shade[:, None], 3, axis=1).astype(np.uint8)
     else:
         rgb = rgb[keep]
-    margin = 1.0
-    low = np.minimum(xyz[:, :2].min(0), gt[:, 1:3].min(0)) - margin
-    high = np.maximum(xyz[:, :2].max(0), gt[:, 1:3].max(0)) + margin
-    width, height = np.ceil((high - low) / METERS_PER_PIXEL).astype(int) + 1
+    return xyz.astype(np.float32), rgb
+
+
+def render_panel(xyz, rgb, gt, meters_per_pixel):
+    """Top-down image of the map points with the trajectory: red, start green, end blue, and a
+    SCALE_BAR_M bar at the bottom left."""
+    low = gt[:, 1:3].min(axis=0) - MAP_MARGIN_M
+    high = gt[:, 1:3].max(axis=0) + MAP_MARGIN_M
+    width, height = np.ceil((high - low) / meters_per_pixel).astype(int) + 1
 
     def pixel(points):  # world x right, y up
-        column = ((points[:, 0] - low[0]) / METERS_PER_PIXEL).astype(int)
-        row = ((high[1] - points[:, 1]) / METERS_PER_PIXEL).astype(int)
+        column = ((points[:, 0] - low[0]) / meters_per_pixel).astype(int)
+        row = ((high[1] - points[:, 1]) / meters_per_pixel).astype(int)
         return np.clip(row, 0, height - 1), np.clip(column, 0, width - 1)
 
     image = np.full((height, width, 3), 255, np.uint8)
@@ -414,21 +434,47 @@ def render_map(ply_path, world_from_map, gt, path):
         inside = (rr - row) ** 2 + (cc - column) ** 2 <= radius ** 2
         image[rr[inside], cc[inside]] = color
 
-    # trajectory densified to one sample per pixel, drawn 2 px wide
+    # trajectory densified to one sample per pixel
     positions = gt[:, 1:3]
     steps = np.maximum(np.ceil(np.linalg.norm(np.diff(positions, axis=0), axis=1) /
-                               METERS_PER_PIXEL), 1).astype(int)
+                               meters_per_pixel), 1).astype(int)
     dense = np.vstack([np.linspace(a, b, n, endpoint=False)
                        for a, b, n in zip(positions[:-1], positions[1:], steps)] + [positions[-1:]])
     for row, column in zip(*pixel(dense)):
-        disc(row, column, 2, (220, 30, 30))
+        disc(row, column, 1, (220, 30, 30))
     rows, columns = pixel(positions[[0, -1]])
-    disc(rows[0], columns[0], 8, (30, 170, 30))
-    disc(rows[1], columns[1], 8, (30, 60, 220))
-    bar = int(SCALE_BAR_M / METERS_PER_PIXEL)
-    image[height - 25:height - 19, 20:20 + bar] = 0
-    write_png(path, image)
-    return width, height
+    disc(rows[0], columns[0], 5, (30, 170, 30))
+    disc(rows[1], columns[1], 5, (30, 60, 220))
+    bar = int(round(SCALE_BAR_M / meters_per_pixel))
+    image[height - 14:height - 10, 10:10 + bar] = 0
+    return image
+
+
+def render_group(panels, path):
+    """One image of the (xyz, rgb, gt) panels at a common scale, PANELS_PER_ROW per row, each
+    framed in grey; the longest panel side is MAX_PANEL_PIXELS."""
+    extent = max(np.ptp(gt[:, 1:3], axis=0).max() + 2 * MAP_MARGIN_M for _, _, gt in panels)
+    meters_per_pixel = extent / MAX_PANEL_PIXELS
+    images = []
+    for xyz, rgb, gt in panels:
+        image = render_panel(xyz, rgb, gt, meters_per_pixel)
+        image[[0, -1], :] = 160
+        image[:, [0, -1]] = 160
+        images.append(image)
+    gap = 16
+    rows = [images[i:i + PANELS_PER_ROW] for i in range(0, len(images), PANELS_PER_ROW)]
+    width = max(sum(image.shape[1] for image in row) + gap * (len(row) + 1) for row in rows)
+    height = sum(max(image.shape[0] for image in row) for row in rows) + gap * (len(rows) + 1)
+    canvas = np.full((height, width, 3), 255, np.uint8)
+    top = gap
+    for row in rows:
+        left = gap
+        for image in row:
+            canvas[top:top + image.shape[0], left:left + image.shape[1]] = image
+            left += image.shape[1] + gap
+        top += max(image.shape[0] for image in row) + gap
+    write_png(path, canvas)
+    return width, height, meters_per_pixel
 
 
 def main():
@@ -446,6 +492,7 @@ def main():
             for bag, topic in COREMAP_DATASETS]
     jobs += [(name, "unilidar", os.path.join(args.unilidar, name), UNILIDAR_IMU)
              for name in UNILIDAR_DATASETS]
+    groups = {}
     for name, source, bag_dir, topic in jobs:
         if args.names and name not in args.names:
             continue
@@ -484,15 +531,26 @@ def main():
                       "at both ends, thinned to 100 Hz\n")
         write_gt(gt, header, os.path.join(out_dir, "gt.txt"))
         written, skipped = write_gps(gt, os.path.join(out_dir, "gps.txt"))
-        width, height = render_map(ply, world_from_map, gt,
-                                   os.path.join(args.images, name + ".png"))
+        xyz, rgb = map_points(ply, world_from_map, gt)
+        groups.setdefault(group_name(name), []).append((name, (xyz, rgb, gt)))
         gravity, gyro_error = check(imu, gt)
         gaps = np.count_nonzero(np.diff(imu[:, 0]) > 0.5)
         print(f"{name}: {len(raw_imu)} IMU at {rate_hz:.0f} Hz -> {len(imu)} at 100 Hz "
               f"({imu[-1, 0] - imu[0, 0]:.1f} s, {gaps} gaps > 0.5 s), {len(gt)} gt "
-              f"({gt[-1, 0] - gt[0, 0]:.1f} s), {written} GPS ({skipped} skipped in gt gaps), "
-              f"map {width}x{height}\n  check: gravity in world {np.round(gravity, 2)} m/s^2, "
+              f"({gt[-1, 0] - gt[0, 0]:.1f} s), {written} GPS ({skipped} skipped in gt gaps)"
+              f"\n  check: gravity in world {np.round(gravity, 2)} m/s^2, "
               f"gyro vs gt rotation error {100 * gyro_error:.1f} %", flush=True)
+
+    every_name = [name for name, _, _, _ in jobs]
+    for group, members in sorted(groups.items()):
+        expected = [name for name in every_name if group_name(name) == group]
+        if [name for name, _ in members] != expected:
+            print(f"{group}: not all of {expected} built, group image not written")
+            continue
+        width, height, meters_per_pixel = render_group(
+            [panel for _, panel in members], os.path.join(args.images, group + ".png"))
+        print(f"{group}.png: {', '.join(expected)} ({width}x{height}, "
+              f"{100 * meters_per_pixel:.1f} cm/pixel)")
 
 if __name__ == "__main__":
     main()
