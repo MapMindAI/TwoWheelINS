@@ -22,3 +22,22 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_library(
+    name = "benchmark_dataset_reader",
+    srcs = ["benchmark_dataset_reader.cc"],
+    hdrs = ["benchmark_dataset_reader.h"],
+    deps = [
+        "//common/sensor:imu_data",
+        "@eigen",
+    ],
+)
+
+cc_test(
+    name = "benchmark_dataset_reader_test",
+    srcs = ["benchmark_dataset_reader_test.cc"],
+    deps = [
+        ":benchmark_dataset_reader",
+        "@googletest//:gtest_main",
+    ],
+)

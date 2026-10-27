@@ -8,12 +8,12 @@ into a 6-DoF pose estimate. See `README.md` for the directory tree and build com
 
 | Path | Contents |
 |---|---|
-| `common/` | Shared C++ helpers: `math/` (so3/se3 Jacobians, covariance, UTM projection), `sensor/` (IMU, GPS, wheel-speed data), `reader/` (MOKUKU text record reader), `simulation/` (simulated IMU data with ground truth) |
-| `fusion/` | `KfcoreIns` (15-state error-state INS on the KFCore UDU filter), `InsFusion` (IMU + GPS on `KfcoreIns`; wheel speed detects standstill), `ins_fusion_main` (runs it on a record, writes TUM poses in UTM) |
-| `tools/` | `trajectory_viewer.html` (TUM viewer: 3D via WebGL over satellite imagery, 2D map via Leaflet) |
+| `common/` | Shared C++ helpers: `math/` (so3/se3 Jacobians, covariance, UTM projection), `sensor/` (IMU, GPS, wheel-speed data), `reader/` (MOKUKU text record reader, benchmark dataset reader), `simulation/` (simulated IMU data with ground truth, drifting GPS noise with a satellite count) |
+| `fusion/` | `KfcoreIns` (15-state error-state INS on the KFCore UDU filter), `InsFusion` (IMU + GPS on `KfcoreIns`; wheel speed detects standstill), `ins_fusion_main` (runs it on a record, writes TUM poses in UTM), `run_dataset_main` (runs it on a benchmark dataset with simulated drifting GPS noise, writes TUM in the dataset frame) |
+| `tools/` | `trajectory_viewer.html` (TUM viewer: 3D via WebGL over satellite imagery, 2D map via Leaflet), `trajectory_error.py` (TUM estimate vs. ground truth), `benchmark_report.py` (HTML report of `run_datasets.sh`) |
 | `third_party/kfcore/` | KFCore UDU Kalman filter (C, unmodified; BSD-3-Clause + attribution clause) |
 | `MODULE.bazel` | All external deps (Bazel Central Registry); commit `MODULE.bazel.lock` with it |
-| `benchmark/` | `run_kfgins.sh` / `run_inslib.sh`: fetch, build and run KF-GINS (GPL-3.0) / INSLIB (AGPL-3.0) on a record under `output/benchmark/`; `ins_benchmark.py` converts the record and writes TUM; `make_datasets.py` builds `benchmark/datasets/` (100 Hz IMU, 1 Hz GPS, ground truth) and map images from looper rosbags (CoreMap ground truth) and unilidar sessions (lidar SLAM ground truth) |
+| `benchmark/` | `run_kfgins.sh` / `run_inslib.sh`: fetch, build and run KF-GINS (GPL-3.0) / INSLIB (AGPL-3.0) on a record under `output/benchmark/`; `ins_benchmark.py` converts the record and writes TUM; `run_datasets.sh` runs `run_dataset_main` on every dataset, prints its error and writes an HTML report; `make_datasets.py` builds `benchmark/datasets/` (100 Hz IMU, 1 Hz GPS, ground truth) and map images from looper rosbags (CoreMap ground truth) and unilidar sessions (lidar SLAM ground truth) |
 | `toolchain/` | aarch64 platform + cross-compile toolchain (`--config=aarch64`) |
 | `.github/workflows/ci.yml` | CI: `bazel test //...` |
 | `data/` | Local MOKUKU captures — git-ignored, never commit |

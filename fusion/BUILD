@@ -56,3 +56,15 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_binary(
+    name = "run_dataset_main",
+    srcs = ["run_dataset_main.cc"],
+    deps = [
+        ":ins_fusion",
+        "//common/math:geodesy",
+        "//common/reader:benchmark_dataset_reader",
+        "//common/simulation:gps_noise",
+        "@gflags",
+    ],
+)
