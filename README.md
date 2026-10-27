@@ -17,7 +17,7 @@ The previous iterated Kalman filter on manifolds (ikfom, GPL-2.0) is in release
 ├── fusion/           # KfcoreIns (error-state INS on KFCore), InsFusion (IMU + GPS, wheel speed for standstill), ins_fusion_main
 ├── tools/            # WebGL/Leaflet trajectory viewer for TUM output
 ├── third_party/      # vendored code: KFCore UDU Kalman filter (C)
-├── benchmark/        # run KF-GINS / INSLIB on a record for comparison (fetched at run time)
+├── benchmark/        # run KF-GINS / INSLIB on a record (fetched at run time); build datasets
 ├── common/           # shared helpers: so3/se3 Jacobians, covariance and UTM projection (math/), sensor data types (sensor/), record reader (reader/), IMU simulation (simulation/)
 ├── toolchain/        # aarch64 platform + cross-compile cc_toolchain
 ├── .github/workflows # CI: bazel test //...
@@ -63,6 +63,17 @@ with the same GPS lines. Results are in the [wiki](https://github.com/MapMindAI/
 ```bash
 benchmark/run_kfgins.sh data/mobili_2.record --mount-yaw-deg 40
 benchmark/run_inslib.sh data/mobili_2.record --mount-yaw-deg 40   # --outage 560:10 drops GPS
+```
+
+`benchmark/make_datasets.py` builds benchmark datasets under `benchmark/datasets/<bag>/` from the
+looper rosbags (front camera IMU) and their CoreMap global maps: `imu.txt`, `gps.txt` (IMU position
+at 1 Hz from the ground truth, no noise; noise is added at run time), `gt.txt` (IMU poses), plus a
+top-down image of the ground truth over the map under `output/benchmark/dataset_maps/`. The
+datasets are listed in the [wiki](https://github.com/MapMindAI/TwoWheelINS/wiki/Benchmark-Datasets).
+It needs ROS 2 (`rosbag2_py`).
+
+```bash
+source /opt/ros/jazzy/setup.bash && /usr/bin/python3 benchmark/make_datasets.py
 ```
 
 Personal flags go in `user.bazelrc` (git-ignored, auto-imported). CI runs `bazel test //...` on
