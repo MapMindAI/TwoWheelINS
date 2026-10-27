@@ -1,5 +1,5 @@
-# world_from_camera_camera_imu (IMU data axes), from the map base_poses.txt (world_from_camera_camera_left)
-# camera_camera_imu -> camera_camera_left (/tf_static): t -0.039018981804763375 -0.015250185184012876 0.02295937002911012 q_xyzw 0.0 0.0 0.0 1.0
+# world_from_imu (camera_camera_imu_optical axes), from the map base_poses.txt (world_from_camera_camera_left)
+# camera_camera_left_from_imu (/tf_static): t 0.039019 0.015250 -0.022959 q_xyzw 0.000000000 0.000000000 0.000000000 1.000000000
 # t_s x_m y_m z_m qx qy qz qw
 2808.675572505 16.627226716 -9.019066929 -1.433848221 -0.618562608 -0.416498722 0.363107166 0.558625366
 2811.925532590 16.432231272 -8.904254614 -1.447699692 -0.635085362 -0.417893307 0.357537785 0.542400682

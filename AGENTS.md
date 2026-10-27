@@ -13,7 +13,7 @@ into a 6-DoF pose estimate. See `README.md` for the directory tree and build com
 | `tools/` | `trajectory_viewer.html` (TUM viewer: 3D via WebGL over satellite imagery, 2D map via Leaflet) |
 | `third_party/kfcore/` | KFCore UDU Kalman filter (C, unmodified; BSD-3-Clause + attribution clause) |
 | `MODULE.bazel` | All external deps (Bazel Central Registry); commit `MODULE.bazel.lock` with it |
-| `benchmark/` | `run_kfgins.sh` / `run_inslib.sh`: fetch, build and run KF-GINS (GPL-3.0) / INSLIB (AGPL-3.0) on a record under `output/benchmark/`; `ins_benchmark.py` converts the record and writes TUM; `make_datasets.py` builds `benchmark/datasets/` (IMU, 1 Hz GPS, ground truth) and map images from rosbags |
+| `benchmark/` | `run_kfgins.sh` / `run_inslib.sh`: fetch, build and run KF-GINS (GPL-3.0) / INSLIB (AGPL-3.0) on a record under `output/benchmark/`; `ins_benchmark.py` converts the record and writes TUM; `make_datasets.py` builds `benchmark/datasets/` (100 Hz IMU, 1 Hz GPS, ground truth) and map images from looper rosbags (CoreMap ground truth) and unilidar sessions (lidar SLAM ground truth) |
 | `toolchain/` | aarch64 platform + cross-compile toolchain (`--config=aarch64`) |
 | `.github/workflows/ci.yml` | CI: `bazel test //...` |
 | `data/` | Local MOKUKU captures — git-ignored, never commit |
