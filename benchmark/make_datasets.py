@@ -113,8 +113,8 @@ def imu_poses(camera_poses, translation, quaternion):
     for pose in camera_poses:
         q = quaternion_product(pose[4:8], camera_from_imu)
         q *= np.sign(q[3]) or 1.0
-        rows.append(np.concatenate(([pose[0]], pose[1:4] + rotation_matrix(pose[4:8]) @ imu_in_camera,
-                                    q / np.linalg.norm(q))))
+        position = pose[1:4] + rotation_matrix(pose[4:8]) @ imu_in_camera
+        rows.append(np.concatenate(([pose[0]], position, q / np.linalg.norm(q))))
     return np.array(rows)
 
 
