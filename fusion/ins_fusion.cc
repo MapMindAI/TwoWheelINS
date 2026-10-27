@@ -16,8 +16,7 @@ namespace {
 
 constexpr double kGravity = 9.8099;
 constexpr double kStaticAlignmentSeconds = 1.0;
-// The filters start from the velocity between two GPS fixes once the vehicle moves this fast.
-constexpr double kMinStartSpeedMps = 3.0;
+// The filters start from the velocity between two GPS fixes this far apart.
 constexpr double kMinStartIntervalSeconds = 0.5;
 constexpr double kMaxStartIntervalSeconds = 1.5;
 constexpr int kYawHypotheses = 12;
@@ -33,11 +32,11 @@ constexpr KfcoreIns::ProcessNoise kProcessNoise = {/*accelerometer=*/0.2,
                                                    /*position=*/0.01,
                                                    /*velocity=*/5e-4,
                                                    /*attitude=*/1e-3};
+// A fix this much newer than the last IMU sample (inside an IMU gap) is applied after predicting
+// to its time with that sample; closer ones are applied at the last sample.
+constexpr double kMaxMeasurementLeadSeconds = 0.1;
 // covariance prediction period (INSLIB's default 20 Hz); the strapdown runs every IMU sample
 constexpr double kCovariancePeriodSeconds = 0.05;
-// A longer IMU gap is not integrated: the filter restarts yaw selection, keeping attitude and
-// gyroscope bias (INSLIB's max_prediction_time_sec).
-constexpr double kMaxImuGapSeconds = 0.5;
 
 // Initial standard deviations of a yaw hypothesis; position comes from the fix's covariance.
 constexpr double kInitialVelocityStd = 1.0;           // m/s
@@ -75,9 +74,8 @@ Eigen::Matrix<double, kRows, KfcoreIns::kStateSize> Selection(int index) {
 
 }  // namespace
 
-InsFusion::InsFusion(bool constrain_vertical_velocity)
-    : constrain_vertical_velocity_(constrain_vertical_velocity),
-      filter_(kProcessNoise, kGravity, kCovariancePeriodSeconds) {}
+InsFusion::InsFusion(const InsFusionOptions& options)
+    : options_(options), filter_(kProcessNoise, kGravity, kCovariancePeriodSeconds) {}
 
 void InsFusion::AddImu(const sensor::ImuData& imu) {
   if (static_sample_count_ == 0) {
@@ -89,7 +87,8 @@ void InsFusion::AddImu(const sensor::ImuData& imu) {
     return;
   }
   last_imu_timestamp_ns_ = imu.timestamp_ns;
-  if (dt > kMaxImuGapSeconds) {
+  last_imu_ = imu;
+  if (dt > options_.max_imu_gap_seconds) {
     Rearm();
     return;
   }
@@ -134,6 +133,7 @@ std::optional<Eigen::Vector3d> InsFusion::AddGps(const sensor::GpsData& gps) {
     utm_zone_ = math::UtmZone(gps.longitude_deg);
     origin_ = math::GeodeticToUtm(Geodetic(gps), *utm_zone_);
   }
+  PredictToMeasurement(gps.timestamp_ns);
   const Eigen::Vector3d position = LocalPosition(gps);
   std::optional<Eigen::Vector3d> innovation;
   if (initialized_) {
@@ -180,7 +180,7 @@ void InsFusion::ConstrainVelocity(int64_t timestamp_ns) {
                       Eigen::Vector3d::Constant(kZeroVelocityStd * kZeroVelocityStd));
     return;
   }
-  if (!constrain_vertical_velocity_) {
+  if (!options_.constrain_vertical_velocity) {
     return;
   }
   filter_.Update<1>(Eigen::Matrix<double, 1, 1>(-filter_.velocity().z()),
@@ -196,7 +196,7 @@ void InsFusion::StartYawHypotheses(const sensor::GpsData& gps) {
   const Eigen::Vector3d position = LocalPosition(gps);
   const Eigen::Vector3d displacement = position - LocalPosition(*last_gps_);
   if (dt < kMinStartIntervalSeconds || dt > kMaxStartIntervalSeconds ||
-      displacement.head<2>().norm() / dt < kMinStartSpeedMps) {
+      displacement.head<2>().norm() / dt < options_.min_start_speed_mps) {
     return;
   }
 
@@ -237,6 +237,21 @@ void InsFusion::UpdateYawHypotheses(const Eigen::Vector3d& position,
                 ->filter;
   hypotheses_.clear();
   initialized_ = true;
+}
+
+void InsFusion::PredictToMeasurement(int64_t timestamp_ns) {
+  const double dt = Seconds(timestamp_ns - last_imu_timestamp_ns_);
+  if (!last_imu_ || dt <= kMaxMeasurementLeadSeconds || dt > options_.max_imu_gap_seconds) {
+    return;
+  }
+  if (initialized_) {
+    filter_.Predict(last_imu_->linear_acceleration, last_imu_->angular_velocity, dt);
+  } else {
+    for (YawHypothesis& hypothesis : hypotheses_) {
+      hypothesis.filter.Predict(last_imu_->linear_acceleration, last_imu_->angular_velocity, dt);
+    }
+  }
+  last_imu_timestamp_ns_ = timestamp_ns;
 }
 
 void InsFusion::Rearm() {

@@ -14,11 +14,11 @@ The previous iterated Kalman filter on manifolds (ikfom, GPL-2.0) is in release
 ## Layout
 
 ```
-├── fusion/           # KfcoreIns (error-state INS on KFCore), InsFusion (IMU + GPS, wheel speed for standstill), ins_fusion_main
-├── tools/            # WebGL/Leaflet trajectory viewer for TUM output
+├── fusion/           # KfcoreIns (error-state INS on KFCore), InsFusion (IMU + GPS, wheel speed for standstill), ins_fusion_main, run_dataset_main
+├── tools/            # WebGL/Leaflet trajectory viewer for TUM output, trajectory error against ground truth
 ├── third_party/      # vendored code: KFCore UDU Kalman filter (C)
 ├── benchmark/        # run KF-GINS / INSLIB on a record (fetched at run time); build datasets
-├── common/           # shared helpers: so3/se3 Jacobians, covariance and UTM projection (math/), sensor data types (sensor/), record reader (reader/), IMU simulation (simulation/)
+├── common/           # shared helpers: so3/se3 Jacobians, covariance and UTM projection (math/), sensor data types (sensor/), record and benchmark dataset readers (reader/), IMU simulation and GPS noise (simulation/)
 ├── toolchain/        # aarch64 platform + cross-compile cc_toolchain
 ├── .github/workflows # CI: bazel test //...
 ├── MODULE.bazel      # external deps (Bazel Central Registry)
@@ -76,6 +76,21 @@ It needs ROS 2 (`rosbag2_py`).
 
 ```bash
 source /opt/ros/jazzy/setup.bash && /usr/bin/python3 benchmark/make_datasets.py
+```
+
+`fusion/run_dataset_main` runs `InsFusion` on one dataset: it adds GPS noise
+(`common/simulation/gps_noise.h`: white noise plus a drift that random-walks in degraded stretches,
+3x faster in height, and decays back in clear ones; `--seed`) with a satellite count per fix that
+follows the drift (RTK fix in clear sky, float and then single as it grows), starts the yaw
+selection at walking speed and bridges IMU gaps up to 1.1 s. `tools/trajectory_error.py` (python3,
+no packages) compares the output with `gt.txt`; `benchmark/run_datasets.sh` does both for every
+dataset and prints one line each.
+
+```bash
+bazel build //fusion:run_dataset_main
+bazel-bin/fusion/run_dataset_main benchmark/datasets/dbot_20261023T043217Z output/run.tum
+tools/trajectory_error.py output/run.tum benchmark/datasets/dbot_20261023T043217Z/gt.txt
+benchmark/run_datasets.sh --seed 2
 ```
 
 Personal flags go in `user.bazelrc` (git-ignored, auto-imported). CI runs `bazel test //...` on

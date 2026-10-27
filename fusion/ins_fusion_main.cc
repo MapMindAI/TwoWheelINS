@@ -56,7 +56,9 @@ int Run(const std::string& record_path, const std::string& output_path) {
   output << std::fixed;
 
   // Merge the streams by timestamp; a measurement is applied before the IMU sample it precedes.
-  InsFusion fusion(FLAGS_constrain_vertical_velocity);
+  InsFusionOptions options;
+  options.constrain_vertical_velocity = FLAGS_constrain_vertical_velocity;
+  InsFusion fusion(options);
   const std::vector<sensor::GpsData>& gps = record->gps;
   const std::vector<sensor::WheelSpeedData>& wheel_speed = record->wheel_speed;
   size_t gps_index = 0;

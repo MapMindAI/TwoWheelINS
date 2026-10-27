@@ -39,5 +39,23 @@ TEST(Geodesy, GeodeticToUtmMatchesProj) {
   }
 }
 
+TEST(Geodesy, UtmToGeodeticInvertsGeodeticToUtm) {
+  const Eigen::Vector3d cases[] = {{22.787839, 113.5210145, 13.0},
+                                   {22.6, 110.5, -2.0},  // 3 deg off the central meridian
+                                   {0.001, 3.0, 0.0},
+                                   {-33.8688, 151.2093, 40.0},
+                                   {60.0, 10.0, 0.0},
+                                   {78.0, 15.0, 0.0}};
+  for (const Eigen::Vector3d& geodetic : cases) {
+    const int zone = UtmZone(geodetic.y());
+    const Eigen::Vector3d utm = GeodeticToUtm(geodetic, zone);
+    const Eigen::Vector3d inverse = UtmToGeodetic(utm, zone, geodetic.x() < 0.0);
+    // 1e-8 deg is about 1 mm; the third-order series leaves up to 0.6 mm in latitude
+    EXPECT_NEAR(inverse.x(), geodetic.x(), 1e-8) << geodetic.transpose();
+    EXPECT_NEAR(inverse.y(), geodetic.y(), 1e-8) << geodetic.transpose();
+    EXPECT_DOUBLE_EQ(inverse.z(), geodetic.z());
+  }
+}
+
 }  // namespace
 }  // namespace mapmind::math

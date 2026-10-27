@@ -15,7 +15,14 @@ constexpr double kScaleFactor = 0.9996;
 constexpr double kFalseEasting = 500000.0;
 constexpr double kSouthernFalseNorthing = 10000000.0;
 
+constexpr double kN = kFlattening / (2.0 - kFlattening);
+constexpr double kN2 = kN * kN;
+constexpr double kN3 = kN2 * kN;
+constexpr double kRectifyingRadius =
+    kSemiMajorAxis / (1.0 + kN) * (1.0 + kN2 / 4.0 + kN2 * kN2 / 64.0);
+
 double ToRadians(double degrees) { return degrees * M_PI / 180.0; }
+double ToDegrees(double radians) { return radians * 180.0 / M_PI; }
 
 }  // namespace
 
@@ -27,14 +34,9 @@ int UtmZone(double longitude_deg) {
 // Krueger series to third order in n, as in
 // https://en.wikipedia.org/wiki/Universal_Transverse_Mercator_coordinate_system
 Eigen::Vector3d GeodeticToUtm(const Eigen::Vector3d& geodetic, int zone) {
-  constexpr double n = kFlattening / (2.0 - kFlattening);
-  constexpr double n2 = n * n;
-  constexpr double n3 = n2 * n;
-  constexpr double rectifying_radius =
-      kSemiMajorAxis / (1.0 + n) * (1.0 + n2 / 4.0 + n2 * n2 / 64.0);
-  constexpr double alpha[3] = {n / 2.0 - 2.0 * n2 / 3.0 + 5.0 * n3 / 16.0,
-                               13.0 * n2 / 48.0 - 3.0 * n3 / 5.0, 61.0 * n3 / 240.0};
-  const double eccentricity_term = 2.0 * std::sqrt(n) / (1.0 + n);
+  constexpr double alpha[3] = {kN / 2.0 - 2.0 * kN2 / 3.0 + 5.0 * kN3 / 16.0,
+                               13.0 * kN2 / 48.0 - 3.0 * kN3 / 5.0, 61.0 * kN3 / 240.0};
+  const double eccentricity_term = 2.0 * std::sqrt(kN) / (1.0 + kN);
 
   const double latitude = ToRadians(geodetic.x());
   const double longitude_offset = ToRadians(geodetic.y() - (6.0 * zone - 183.0));
@@ -51,8 +53,32 @@ Eigen::Vector3d GeodeticToUtm(const Eigen::Vector3d& geodetic, int zone) {
     northing += alpha[j - 1] * std::sin(2.0 * j * xi) * std::cosh(2.0 * j * eta);
   }
   const double false_northing = geodetic.x() < 0.0 ? kSouthernFalseNorthing : 0.0;
-  return {kFalseEasting + kScaleFactor * rectifying_radius * easting,
-          false_northing + kScaleFactor * rectifying_radius * northing, geodetic.z()};
+  return {kFalseEasting + kScaleFactor * kRectifyingRadius * easting,
+          false_northing + kScaleFactor * kRectifyingRadius * northing, geodetic.z()};
+}
+
+Eigen::Vector3d UtmToGeodetic(const Eigen::Vector3d& utm, int zone, bool southern) {
+  constexpr double beta[3] = {kN / 2.0 - 2.0 * kN2 / 3.0 + 37.0 * kN3 / 96.0,
+                              kN2 / 48.0 + kN3 / 15.0, 17.0 * kN3 / 480.0};
+  constexpr double delta[3] = {2.0 * kN - 2.0 * kN2 / 3.0 - 2.0 * kN3,
+                               7.0 * kN2 / 3.0 - 8.0 * kN3 / 5.0, 56.0 * kN3 / 15.0};
+  const double false_northing = southern ? kSouthernFalseNorthing : 0.0;
+  const double xi = (utm.y() - false_northing) / (kScaleFactor * kRectifyingRadius);
+  const double eta = (utm.x() - kFalseEasting) / (kScaleFactor * kRectifyingRadius);
+
+  double xi_prime = xi;
+  double eta_prime = eta;
+  for (int j = 1; j <= 3; ++j) {
+    xi_prime -= beta[j - 1] * std::sin(2.0 * j * xi) * std::cosh(2.0 * j * eta);
+    eta_prime -= beta[j - 1] * std::cos(2.0 * j * xi) * std::sinh(2.0 * j * eta);
+  }
+  const double chi = std::asin(std::sin(xi_prime) / std::cosh(eta_prime));
+  double latitude = chi;
+  for (int j = 1; j <= 3; ++j) {
+    latitude += delta[j - 1] * std::sin(2.0 * j * chi);
+  }
+  const double longitude_offset = std::atan2(std::sinh(eta_prime), std::cos(xi_prime));
+  return {ToDegrees(latitude), 6.0 * zone - 183.0 + ToDegrees(longitude_offset), utm.z()};
 }
 
 }  // namespace mapmind::math
