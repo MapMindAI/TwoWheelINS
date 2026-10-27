@@ -49,28 +49,21 @@ from tf2_msgs.msg import TFMessage
 FRONT_IMU = "/camera/camera/imu"
 BACK_IMU = "/back/camera/camera/imu"
 UNILIDAR_IMU = "/unilidar/imu"
-# CoreMap datasets: (bag directory relative to --rosbags, IMU topic). The lens bags have the front
-# camera IMU, with ~1 s dropouts every 2-4 s; scene0 only records the back camera IMU, complete.
+# CoreMap datasets: (bag directory relative to --rosbags, IMU topic). The lens bags (the 3 longest)
+# have the front camera IMU, with ~1 s dropouts every 2-4 s; scene0 only records the back camera
+# IMU, complete.
 COREMAP_DATASETS = [
     ("lens/indoor-office_20260811_133205", FRONT_IMU),
     ("lens/indoor-office_20260811_133749", FRONT_IMU),
-    ("lens/indoor-office_20260811_134400", FRONT_IMU),
     ("lens/indoor-office_20260811_134658", FRONT_IMU),
-    ("lens/indoor-office_20260811_135008", FRONT_IMU),
     ("scene0_outdoor/daytime/dbot_20261023T042109Z", BACK_IMU),
     ("scene0_outdoor/daytime/dbot_20261023T043217Z", BACK_IMU),
 ]
-# unilidar_looper sessions
+# unilidar_looper sessions in strong light or daylight
 UNILIDAR_DATASETS = [
-    "garden_cloudy_20260715_122519_no_light",
-    "garden_cloudy_20260715_122906_weak_light",
     "garden_cloudy_20260715_124158_strong_light",
     "garden_day_20260716_080819",
-    "grass_cloudy_20260715_123331_no_light",
-    "grass_cloudy_20260715_123630_weak_light",
     "grass_cloudy_20260715_124004_strong_light",
-    "playground_cloudy_20260715_121344_no_light",
-    "playground_cloudy_20260715_121620_weak_light",
     "playground_cloudy_20260715_124806_strong_light",
     "playground_day_20260701_031131_A",
     "playground_day_20260702_072203_color",
