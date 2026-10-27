@@ -65,9 +65,10 @@ benchmark/run_kfgins.sh data/mobili_2.record --mount-yaw-deg 40
 benchmark/run_inslib.sh data/mobili_2.record --mount-yaw-deg 40   # --outage 560:10 drops GPS
 ```
 
-`benchmark/make_datasets.py` builds benchmark datasets under `benchmark/datasets/<bag>/` from the
-looper rosbags (front camera IMU) and their CoreMap global maps: `imu.txt`, `gps.txt` (IMU position
-at 1 Hz from the ground truth, no noise; noise is added at run time), `gt.txt` (IMU poses), plus a
+`benchmark/make_datasets.py` builds benchmark datasets under `benchmark/datasets/<name>/` from
+the looper rosbags with their CoreMap global maps (camera IMU) and from the unilidar looper sessions
+with their lidar SLAM trajectory (`/unilidar/imu`): `imu.txt` (100 Hz), `gps.txt` (IMU position at
+1 Hz from the ground truth, no noise; noise is added at run time), `gt.txt` (IMU poses), plus a
 top-down image of the ground truth over the map under `output/benchmark/dataset_maps/`. The
 datasets are listed in the [wiki](https://github.com/MapMindAI/TwoWheelINS/wiki/Benchmark-Datasets).
 It needs ROS 2 (`rosbag2_py`).
