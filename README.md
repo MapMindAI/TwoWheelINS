@@ -15,7 +15,7 @@ The previous iterated Kalman filter on manifolds (ikfom, GPL-2.0) is in release
 
 ```
 ├── fusion/           # KfcoreIns (error-state INS on KFCore), InsFusion (IMU + GPS, wheel speed for standstill), ins_fusion_main, run_dataset_main
-├── tools/            # WebGL/Leaflet trajectory viewer for TUM output, trajectory error against ground truth
+├── tools/            # WebGL/Leaflet trajectory viewer for TUM output, trajectory error and benchmark HTML report
 ├── third_party/      # vendored code: KFCore UDU Kalman filter (C)
 ├── benchmark/        # run KF-GINS / INSLIB on a record (fetched at run time); build datasets
 ├── common/           # shared helpers: so3/se3 Jacobians, covariance and UTM projection (math/), sensor data types (sensor/), record and benchmark dataset readers (reader/), IMU simulation and GPS noise (simulation/)
@@ -84,7 +84,10 @@ source /opt/ros/jazzy/setup.bash && /usr/bin/python3 benchmark/make_datasets.py
 follows the drift (RTK fix in clear sky, float and then single as it grows), starts the yaw
 selection at walking speed and bridges IMU gaps up to 1.1 s. `tools/trajectory_error.py` (python3,
 no packages) compares the output with `gt.txt`; `benchmark/run_datasets.sh` does both for every
-dataset and prints one line each.
+dataset, prints one line each and writes the estimates and an HTML report
+(`tools/benchmark_report.py`: summary table, then per dataset the trajectory with ground truth and
+the GPS fixes coloured by satellite count, and the horizontal, height and rotation error over time)
+to `output/benchmark/runs/<YYYYmmdd_HHMMSS>/`.
 
 ```bash
 bazel build //fusion:run_dataset_main
