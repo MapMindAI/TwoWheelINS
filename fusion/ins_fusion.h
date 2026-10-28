@@ -20,8 +20,8 @@ namespace mapmind::fusion {
 struct InsFusionOptions {
   // level-road prior: near-zero world vertical velocity while moving
   bool constrain_vertical_velocity = false;
-  // A longer IMU gap restarts the initialization; a shorter one is integrated with the first
-  // sample after it (INSLIB's max_prediction_time_sec).
+  // A longer IMU gap restarts the initialization, like INSLIB (its max_prediction_time_sec); a
+  // shorter one is integrated with the first sample after it.
   double max_imu_gap_seconds = 0.5;
   // direction of travel in the IMU frame (unit vector)
   Eigen::Vector3d forward = Eigen::Vector3d::UnitX();

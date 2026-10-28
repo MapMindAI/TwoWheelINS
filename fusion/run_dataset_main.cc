@@ -31,8 +31,6 @@
 
 DEFINE_uint32(seed, 1, "random seed of the GPS noise");
 DEFINE_double(gps_noise_scale, 0.1, "scales the drift and white noise of the GPS");
-DEFINE_double(max_imu_gap_seconds, 1.1,
-              "longer IMU gaps restart the initialization (the lens bags drop 1 s every 2-4 s)");
 DEFINE_bool(constrain_vertical_velocity, false,
             "level-floor prior: near-zero world vertical velocity while moving");
 
@@ -71,7 +69,6 @@ int Run(const std::string& dataset_path, const std::string& output_path) {
   // a fix is applied before the IMU sample it precedes
   InsFusionOptions options;
   options.constrain_vertical_velocity = FLAGS_constrain_vertical_velocity;
-  options.max_imu_gap_seconds = FLAGS_max_imu_gap_seconds;
   options.forward = dataset->forward;
   InsFusion fusion(options);
   size_t gps_index = 0;

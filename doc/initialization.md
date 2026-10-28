@@ -54,22 +54,22 @@ From then on every IMU sample predicts the filter and every GPS fix updates its 
 
 ## 4. IMU gaps
 
-- A gap up to `max_imu_gap_seconds` is predicted over with the first sample after it (a GPS fix
-  inside the gap is applied after predicting to its time with the last sample).
-- A longer gap restarts from the next two fixes: the attitude and gyroscope bias are carried from
-  the filter.
+- A gap up to `max_imu_gap_seconds` (0.5 s, INSLIB's `max_prediction_time_sec`) is predicted over
+  with the first sample after it (a GPS fix inside the gap is applied after predicting to its time
+  with the last sample).
+- A longer gap restarts from the next two fixes, like INSLIB: the attitude and gyroscope bias are
+  carried from the filter.
 
 ## Known limitations
 
 Benchmark numbers are from `benchmark/run_datasets.sh --seed 2`.
 
-- **Start yaw.** In 1 s a walker moves 0.6–1.2 m while a single-solution fix is off by 1–2.5 m,
-  and some start standing still, so the start yaw is 4–180° off. GPS position updates hardly
-  observe yaw while walking, so the error stays: the yaw median is 4–166° on the outdoor datasets.
-  A heading measurement (magnetometer) is needed.
-- **IMU gaps.** Predicting over a 1 s gap with one sample is wrong while walking: that sample is
-  2–5 m/s² and 0.7 rad/s away from the mean motion. The lens (`indoor-office_*`) datasets lose
-  1 s every 2–4 s, and their height runs off by tens to hundreds of metres, partly into a wrong
-  accelerometer bias.
+- **Start yaw.** The first 1 s step is the course of that second, which can differ from the mean
+  walking direction in `forward.txt`, and single-solution fixes (1–2.5 m off) make it noise. GPS
+  position updates hardly observe yaw while walking, so the error stays: the yaw median is 1–37° on
+  the outdoor datasets (`--gps_noise_scale 0.1`). A heading measurement (magnetometer) is needed.
+- **IMU gaps.** The lens (`indoor-office_*`) recordings lost 1 s of IMU every 2–4 s (the recorder
+  fell behind the 400 Hz stream), so InsFusion restarts after each gap and has no output for about
+  2 s after it.
 - **Gyroscope bias.** Starting at zero, a vertical gyroscope bias is learnt from GPS only, which
   is slow in a steady turn.

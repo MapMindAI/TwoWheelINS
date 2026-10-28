@@ -29,7 +29,7 @@ constexpr KfcoreIns::ProcessNoise kProcessNoise = {/*accelerometer=*/0.2,
                                                    /*attitude=*/1e-3};
 // A fix this much newer than the last IMU sample (inside an IMU gap) is applied after predicting
 // to its time with that sample; closer ones are applied at the last sample.
-constexpr double kMaxMeasurementLeadSeconds = 0.1;
+constexpr double kMaxMeasurementLeadSeconds = 0.2;
 // covariance prediction period (INSLIB's default 20 Hz); the strapdown runs every IMU sample
 constexpr double kCovariancePeriodSeconds = 0.05;
 
