@@ -24,11 +24,13 @@ struct GpsPosition {
 struct BenchmarkDataset {
   std::vector<sensor::ImuData> imu;
   std::vector<GpsPosition> gps;
+  // walking direction in the IMU frame (unit vector)
+  Eigen::Vector3d forward;
 };
 
-// Reads imu.txt (t_s ax ay az gx gy gz) and gps.txt (t_s x y z) of a benchmark/datasets/<name>
-// directory; '#' lines are comments. Returns nullopt if a file cannot be opened or a line does not
-// parse.
+// Reads imu.txt (t_s ax ay az gx gy gz), gps.txt (t_s x y z) and forward.txt (x y z) of a
+// benchmark/datasets/<name> directory; '#' lines are comments. Returns nullopt if a file cannot be
+// opened or a line does not parse.
 std::optional<BenchmarkDataset> ReadBenchmarkDataset(const std::string& directory);
 
 }  // namespace mapmind::reader

@@ -72,7 +72,7 @@ TEST(GpsNoise, DriftAccumulatesAndRecovers) {
   for (int axis = 0; axis < 3; ++axis) {
     EXPECT_LT(step_std[axis], 0.5 * error_std[axis]) << axis;
   }
-  EXPECT_GT(error_std.z(), 2.0 * error_std.head<2>().maxCoeff());
+  EXPECT_GT(error_std.z(), 1.3 * error_std.head<2>().maxCoeff());
 }
 
 TEST(GpsNoise, SatelliteCountFollowsError) {

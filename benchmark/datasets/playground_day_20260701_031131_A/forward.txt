@@ -1,0 +1,3 @@
+# walking direction in the IMU frame (unit vector): mean of the ground-truth horizontal velocity direction rotated into the IMU frame over 294 0.5 s steps faster than 0.5 m/s, median deviation 7.9 deg
+# x y z
+-0.127380 0.219770 0.967200
