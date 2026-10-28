@@ -82,16 +82,17 @@ source /opt/ros/jazzy/setup.bash && /usr/bin/python3 benchmark/make_datasets.py
 
 `fusion/run_dataset_main` runs `InsFusion` on one dataset: it adds GPS noise
 (`common/simulation/gps_noise.h`: white noise plus a drift that random-walks in degraded stretches,
-1.5x faster in height, and decays back in clear ones; `--seed`, `--gps_noise_scale`) with a
-satellite count per fix that follows the drift (RTK fix in clear sky, float and then single as it
-grows), fits the initial yaw to the GPS course along the dataset's `forward.txt` and bridges IMU
-gaps up to 1.1 s. `tools/trajectory_error.py` (python3, no packages) compares the output with
-`gt.txt`. `benchmark/run_datasets.sh` runs InsFusion on every dataset, then INSLIB on the same
-noisy GPS (`benchmark/run_inslib_datasets.sh`: IMU turned into INSLIB's FRD body frame along
-`forward.txt`, automotive mode for the yaw, no magnetometer), prints one line per dataset and
-method, and writes the estimates and an HTML report comparing them (`tools/benchmark_report.py`:
-summary table, then per dataset the 3D trajectories with ground truth and the GPS fixes coloured
-by satellite count, and the horizontal, height and rotation error over time) to `output/benchmark/runs/<YYYYmmdd_HHMMSS>/`.
+1.5x faster in height, and decays back in clear ones; `--seed`, `--gps_noise_scale`, default 0.1)
+with a satellite count per fix that follows the drift (RTK fix in clear sky, float and then single
+as it grows), takes the initial yaw from the course of the first two fixes along the dataset's
+`forward.txt` and bridges IMU gaps up to 1.1 s. `tools/trajectory_error.py` (python3, no packages)
+compares the output with `gt.txt`. `benchmark/run_datasets.sh` runs InsFusion on every dataset, then
+INSLIB on the same noisy GPS (`benchmark/run_inslib_datasets.sh`: IMU turned into INSLIB's FRD body
+frame along `forward.txt`, automotive mode for the yaw, no magnetometer), prints one line per
+dataset and method, and writes the estimates and an HTML report comparing them
+(`tools/benchmark_report.py`: summary table, then per dataset the 3D trajectories with ground truth
+and the GPS fixes coloured by satellite count, and the horizontal, height and rotation error over
+time) to `output/benchmark/runs/<YYYYmmdd_HHMMSS>/`.
 
 ```bash
 bazel build //fusion:run_dataset_main

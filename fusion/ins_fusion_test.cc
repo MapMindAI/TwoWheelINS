@@ -18,8 +18,8 @@ constexpr double kGravity = 9.8099;
 constexpr int64_t kImuPeriodNs = 10'000'000;  // 100 Hz
 constexpr int kWheelEvery = 10;               // 10 Hz
 constexpr int kGpsEvery = 100;                // 1 Hz
-// The yaw fit needs 10 fixes with the speed changing (from 2 s), then the filter settles.
-constexpr double kSettledSeconds = 16.0;
+// The filter starts at the 3 s fix (levelling, then two fixes) and settles.
+constexpr double kSettledSeconds = 10.0;
 
 struct Motion {
   double speed;
@@ -38,8 +38,7 @@ Motion Ride(double t) {
   return {5.0, 0.0, 0.2};
 }
 
-// arbitrary tilted IMU mount (unknown to the filter unless given as InsFusionOptions::forward):
-// body to vehicle (x forward, y left, z up)
+// arbitrary tilted IMU mount: body to vehicle (x forward, y left, z up)
 Sophus::SO3d VehicleFromBody() {
   return Sophus::SO3d::rotX(1.1) * Sophus::SO3d::rotZ(0.4) * Sophus::SO3d::rotY(0.2);
 }
@@ -66,7 +65,11 @@ struct Simulation {
   double gyroscope_bias = 0.01;
   // errors count from this time on
   double settled_s = kSettledSeconds;
-  InsFusionOptions options;
+  InsFusionOptions options = [] {
+    InsFusionOptions options;
+    options.forward = VehicleFromBody().inverse() * Eigen::Vector3d::UnitX();
+    return options;
+  }();
   // Returns the GPS position error (UTM, m) at `t`, or nullopt to drop the fix.
   std::function<std::optional<Eigen::Vector3d>(double)> gps_error = [](double) {
     return Eigen::Vector3d::Zero();
@@ -77,7 +80,7 @@ struct Simulation {
 
 struct Errors {
   int pose_count = 0;
-  // times the filter fell back from initialized to the yaw fit
+  // times the filter fell back from initialized to the start from two fixes
   int rearm_count = 0;
   std::optional<int> utm_zone;
   // after Simulation::settled_s, in [error_from_s, error_to_s)
@@ -169,31 +172,26 @@ TEST(InsFusion, TracksSimulatedRide) {
   EXPECT_EQ(errors.utm_zone, math::UtmZone(113.5210145));
   EXPECT_GT(errors.pose_count, 20 * 100);
   EXPECT_LT(errors.max_position, 0.5);
-  // Yaw is observable only while the speed changes: in a steady turn a yaw error looks like a
-  // body-fixed accelerometer bias, and the gyroscope bias (starting at zero) is learnt from GPS
-  // only, so the error left after the yaw fit decays slowly.
+  // The gyroscope bias (starting at zero) is learnt from GPS only, slowly in a steady turn.
   EXPECT_LT(errors.max_rotation, 0.25);
 }
 
 TEST(InsFusion, TracksSimulatedRideWithoutGyroscopeBias) {
   Simulation simulation;
   simulation.gyroscope_bias = 0.0;
-  // exact, unbiased IMU: the window over the static start and the straight acceleration has a
-  // singular fit, which must not start the filter
   const Errors errors = Simulate(simulation, 0.0, 40.0);
   EXPECT_LT(errors.max_position, 0.5);
   EXPECT_LT(errors.max_rotation, 0.15);
 }
 
-TEST(InsFusion, FitsYawToGpsCourseWithKnownForward) {
+TEST(InsFusion, StartsAtSecondFix) {
   Simulation simulation;
-  // without a gyroscope bias to learn, the rotation error from initialization on is the yaw fit's
+  // without a gyroscope bias to learn, the rotation error from the start on is the start yaw's
   simulation.gyroscope_bias = 0.0;
   simulation.settled_s = 0.0;
-  simulation.options.forward = VehicleFromBody().inverse() * Eigen::Vector3d::UnitX();
   const Errors errors = Simulate(simulation, 0.0, 40.0);
-  // initialized within 10 s, from a start velocity of one GPS step
-  EXPECT_GT(errors.pose_count, 30 * 100);
+  // levelled at 1 s, fixes at 2 s and 3 s
+  EXPECT_EQ(errors.pose_count, 37 * 100 + 1);
   EXPECT_LT(errors.max_position, 1.0);
   EXPECT_LT(errors.max_rotation, 0.03);
 }
@@ -240,14 +238,14 @@ TEST(InsFusion, IgnoresGpsAltitudeDriftOnLevelRoad) {
   EXPECT_GT(Simulate(simulation, 20.0, 40.0).max_height, 12.0);
 }
 
-TEST(InsFusion, RefitsYawAfterImuGap) {
+TEST(InsFusion, RestartsAfterImuGap) {
   Simulation simulation;
   simulation.duration_s = 60.0;
   simulation.imu_dropped = [](double t) { return t >= 25.0 && t < 26.0; };
   const Errors errors = Simulate(simulation, 45.0, 60.0);
   EXPECT_EQ(errors.rearm_count, 1);
   EXPECT_LT(errors.max_position, 0.5);
-  // refitted in a steady turn, with the gyroscope bias still unsettled
+  // restarted in a steady turn, with the gyroscope bias still unsettled
   EXPECT_LT(errors.max_rotation, 0.4);
 }
 

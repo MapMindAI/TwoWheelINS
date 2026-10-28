@@ -55,19 +55,20 @@ imu:
 gnss:
   leverarm_frd: [0, 0, 0]
   delay_ms: 0
-  # GpsCovariance reaches 7.5 m / 50 m at 4 satellites
+  # GpsCovariance reaches 7.5 m / 50 m at 4 satellites; a velocity from two such fixes 1 s apart
+  # has sqrt(2) times that
   max_horizontal_pos_stddev_m: 8.0
   max_vertical_pos_stddev_m: 60.0
   start_max_horizontal_pos_stddev_m: 8.0
   start_max_vertical_pos_stddev_m: 60.0
   stop_max_horizontal_pos_stddev_m: 8.0
   stop_max_vertical_pos_stddev_m: 60.0
-  max_horizontal_vel_stddev_mps: 20.0
-  max_vertical_vel_stddev_mps: 20.0
-  start_max_horizontal_vel_stddev_mps: 20.0
-  start_max_vertical_vel_stddev_mps: 20.0
-  stop_max_horizontal_vel_stddev_mps: 20.0
-  stop_max_vertical_vel_stddev_mps: 20.0
+  max_horizontal_vel_stddev_mps: 12.0
+  max_vertical_vel_stddev_mps: 80.0
+  start_max_horizontal_vel_stddev_mps: 12.0
+  start_max_vertical_vel_stddev_mps: 80.0
+  stop_max_horizontal_vel_stddev_mps: 12.0
+  stop_max_vertical_vel_stddev_mps: 80.0
 
 mag:
   enable: 0

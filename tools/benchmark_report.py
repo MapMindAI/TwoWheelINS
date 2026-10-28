@@ -403,6 +403,17 @@ function View(canvas) {
     data.methods.forEach((m, i) => { if (shown[i]) line(m.estimate, colour('--method' + i), 1.5); });
     data.gps.forEach(f => { const q = project(f, width, height);
       g.beginPath(); g.fillStyle = f[3]; g.arc(q[0], q[1], 3, 0, 2 * Math.PI); g.fill(); });
+    // start: ring, end: square
+    const ends = (points, stroke) => {
+      if (!points.length) return;
+      const a = project(points[0], width, height), b = project(points[points.length - 1], width,
+                                                                 height);
+      g.lineWidth = 2.5; g.strokeStyle = stroke; g.fillStyle = colour('--bg');
+      g.beginPath(); g.arc(a[0], a[1], 6, 0, 2 * Math.PI); g.fill(); g.stroke();
+      g.fillStyle = stroke; g.fillRect(b[0] - 5, b[1] - 5, 10, 10);
+    };
+    ends(data.truth, colour('--truth'));
+    data.methods.forEach((m, i) => { if (shown[i]) ends(m.estimate, colour('--method' + i)); });
   }
 
   let drag = null;
@@ -464,7 +475,8 @@ def legend(method_names):
         f'style="background:var(--method{i})"></i>{html.escape(name)}</label>'
         for i, name in enumerate(method_names))
     return ('<div class="legend"><span><i style="background:var(--truth)"></i>ground truth</span>'
-            f'{methods}<span>thin lines: GPS fix to each estimate at its time</span>'
+            f'{methods}<span>○ start ■ end</span>'
+            '<span>thin lines: GPS fix to each estimate at its time</span>'
             f'<span>GPS satellites {MIN_SATELLITES}<span class="scale"></span>'
             f'{MAX_SATELLITES} (single &lt; {MIN_FLOAT_SATELLITES} ≤ float &lt; '
             f'{MIN_FIX_SATELLITES} ≤ fix)</span></div>')

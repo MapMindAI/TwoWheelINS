@@ -41,7 +41,7 @@ TEST(GpsNoise, DriftAccumulatesAndRecovers) {
       Errors(AddGpsNoise(StaticGps(), kOrigin, GpsNoiseOptions{}, 1));
   int small_count = 0;
   int large_count = 0;
-  // stretches that pass 2 m horizontal error and later drop below 0.3 m again
+  // stretches that pass 1 m horizontal error and later drop below 0.15 m again
   int recovery_count = 0;
   bool large = false;
   Eigen::Vector3d sum_squares = Eigen::Vector3d::Zero();
@@ -49,11 +49,11 @@ TEST(GpsNoise, DriftAccumulatesAndRecovers) {
   for (size_t i = 0; i < errors.size(); ++i) {
     const Eigen::Vector3d& error = errors[i];
     const double horizontal = error.head<2>().norm();
-    small_count += horizontal < 0.3;
-    large_count += horizontal > 2.0;
-    if (horizontal > 2.0) {
+    small_count += horizontal < 0.15;
+    large_count += horizontal > 1.0;
+    if (horizontal > 1.0) {
       large = true;
-    } else if (large && horizontal < 0.3) {
+    } else if (large && horizontal < 0.15) {
       large = false;
       ++recovery_count;
     }
