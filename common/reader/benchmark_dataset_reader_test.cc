@@ -12,10 +12,12 @@
 namespace mapmind::reader {
 namespace {
 
-std::string WriteDataset(const std::string& imu, const std::string& gps) {
+std::string WriteDataset(const std::string& imu, const std::string& gps,
+                         const std::string& forward = "# x y z\n0 0 2\n") {
   const std::string directory = std::getenv("TEST_TMPDIR");
   std::ofstream(directory + "/imu.txt") << imu;
   std::ofstream(directory + "/gps.txt") << gps;
+  std::ofstream(directory + "/forward.txt") << forward;
   return directory;
 }
 
@@ -41,11 +43,14 @@ TEST(BenchmarkDatasetReader, ParsesImuAndGps) {
   EXPECT_EQ(dataset->gps[0].timestamp_ns, 2993000000000);
   EXPECT_DOUBLE_EQ(dataset->gps[0].position.x(), 1.2903);
   EXPECT_DOUBLE_EQ(dataset->gps[0].position.z(), -1.1886);
+
+  EXPECT_EQ(dataset->forward, Eigen::Vector3d::UnitZ());
 }
 
 TEST(BenchmarkDatasetReader, RejectsMalformedLine) {
   EXPECT_FALSE(ReadBenchmarkDataset(WriteDataset("2985.87 0.1 -9.7\n", "")).has_value());
   EXPECT_FALSE(ReadBenchmarkDataset(WriteDataset("", "2993.0 1.0 2.0 3.0 4.0\n")).has_value());
+  EXPECT_FALSE(ReadBenchmarkDataset(WriteDataset("", "", "0 0 1\n0 1 0\n")).has_value());
 }
 
 TEST(BenchmarkDatasetReader, MissingDirectory) {

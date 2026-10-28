@@ -22,8 +22,8 @@ struct GpsNoiseOptions {
   double mean_clear_s = 30.0;
   double mean_degraded_s = 20.0;
   // m/sqrt(s), random-walk rate of the drift while degraded
-  double horizontal_walk = 0.2;
-  double vertical_walk = 0.6;
+  double horizontal_walk = 0.1;
+  double vertical_walk = 0.15;
   // s, time constant of the drift decay while clear
   double recovery_s = 10.0;
   // m, std of the white noise (RTK fix level)

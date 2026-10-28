@@ -18,6 +18,7 @@ The previous iterated Kalman filter on manifolds (ikfom, GPL-2.0) is in release
 ├── tools/            # WebGL/Leaflet trajectory viewer for TUM output, trajectory error and benchmark HTML report
 ├── third_party/      # vendored code: KFCore UDU Kalman filter (C)
 ├── benchmark/        # run KF-GINS / INSLIB on a record (fetched at run time); build datasets
+├── doc/              # design notes: InsFusion initialization
 ├── common/           # shared helpers: so3/se3 Jacobians, covariance and UTM projection (math/), sensor data types (sensor/), record and benchmark dataset readers (reader/), IMU simulation and GPS noise (simulation/)
 ├── toolchain/        # aarch64 platform + cross-compile cc_toolchain
 ├── .github/workflows # CI: bazel test //...
@@ -68,7 +69,8 @@ benchmark/run_inslib.sh data/mobili_2.record --mount-yaw-deg 40   # --outage 560
 `benchmark/make_datasets.py` builds benchmark datasets under `benchmark/datasets/<name>/` from
 the looper rosbags with their CoreMap global maps (camera IMU) and from the unilidar looper sessions
 with their lidar SLAM trajectory (`/unilidar/imu`): `imu.txt` (100 Hz), `gps.txt` (IMU position at
-1 Hz from the ground truth, no noise; noise is added at run time), `gt.txt` (IMU poses), plus one
+1 Hz from the ground truth, no noise; noise is added at run time), `gt.txt` (IMU poses),
+`forward.txt` (walking direction in the IMU frame, from the ground truth), plus one
 top-down image per group of datasets (trajectories over their maps) under
 `output/benchmark/dataset_maps/`. The
 datasets are listed in the [wiki](https://github.com/MapMindAI/TwoWheelINS/wiki/Benchmark-Datasets).
@@ -80,14 +82,17 @@ source /opt/ros/jazzy/setup.bash && /usr/bin/python3 benchmark/make_datasets.py
 
 `fusion/run_dataset_main` runs `InsFusion` on one dataset: it adds GPS noise
 (`common/simulation/gps_noise.h`: white noise plus a drift that random-walks in degraded stretches,
-3x faster in height, and decays back in clear ones; `--seed`) with a satellite count per fix that
-follows the drift (RTK fix in clear sky, float and then single as it grows), starts the yaw
-selection at walking speed and bridges IMU gaps up to 1.1 s. `tools/trajectory_error.py` (python3,
-no packages) compares the output with `gt.txt`; `benchmark/run_datasets.sh` does both for every
-dataset, prints one line each and writes the estimates and an HTML report
-(`tools/benchmark_report.py`: summary table, then per dataset the trajectory with ground truth and
-the GPS fixes coloured by satellite count, and the horizontal, height and rotation error over time)
-to `output/benchmark/runs/<YYYYmmdd_HHMMSS>/`.
+1.5x faster in height, and decays back in clear ones; `--seed`, `--gps_noise_scale`, default 0.1)
+with a satellite count per fix that follows the drift (RTK fix in clear sky, float and then single
+as it grows), takes the initial yaw from the course of the first two fixes along the dataset's
+`forward.txt` and restarts after IMU gaps over 0.5 s. `tools/trajectory_error.py` (python3, no
+packages) compares the output with `gt.txt`. `benchmark/run_datasets.sh` runs InsFusion on every
+dataset, then INSLIB on the same noisy GPS (`benchmark/run_inslib_datasets.sh`: IMU turned into
+INSLIB's FRD body frame along `forward.txt`, automotive mode for the yaw, no magnetometer), prints
+one line per dataset and method, and writes the estimates and an HTML report comparing them
+(`tools/benchmark_report.py`: summary table, then per dataset the 3D trajectories with ground truth
+and the GPS fixes coloured by satellite count, and the horizontal, height and rotation error over
+time) to `output/benchmark/runs/<YYYYmmdd_HHMMSS>/`.
 
 ```bash
 bazel build //fusion:run_dataset_main

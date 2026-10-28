@@ -45,7 +45,9 @@ std::optional<BenchmarkDataset> ReadBenchmarkDataset(const std::string& director
       ReadColumns(directory + "/imu.txt", 7);
   const std::optional<std::vector<std::vector<double>>> gps_rows =
       ReadColumns(directory + "/gps.txt", 4);
-  if (!imu_rows || !gps_rows) {
+  const std::optional<std::vector<std::vector<double>>> forward_rows =
+      ReadColumns(directory + "/forward.txt", 3);
+  if (!imu_rows || !gps_rows || !forward_rows || forward_rows->size() != 1) {
     return std::nullopt;
   }
   BenchmarkDataset dataset;
@@ -56,6 +58,8 @@ std::optional<BenchmarkDataset> ReadBenchmarkDataset(const std::string& director
   for (const std::vector<double>& row : *gps_rows) {
     dataset.gps.push_back({Nanoseconds(row[0]), Eigen::Vector3d(row[1], row[2], row[3])});
   }
+  const std::vector<double>& forward = forward_rows->front();
+  dataset.forward = Eigen::Vector3d(forward[0], forward[1], forward[2]).normalized();
   return dataset;
 }
 

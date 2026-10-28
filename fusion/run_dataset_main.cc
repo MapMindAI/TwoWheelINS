@@ -10,8 +10,10 @@
 // easting, northing and altitude offsets from kOrigin) with white noise, a drift that builds up in
 // degraded stretches and decays in clear ones, and a satellite count that follows the drift.
 // Trailing "# gps t_s x y z satellites" comments carry the noisy fixes in the world frame.
+// The dataset's forward.txt (walking direction in the IMU frame) sets InsFusionOptions::forward,
+// so the initial yaw comes from the course of the first two GPS fixes.
 //
-// Usage: run_dataset_main [--seed N] [--min_start_speed_mps V] <dataset> <out.tum>
+// Usage: run_dataset_main [--seed N] [--gps_noise_scale S] <dataset> <out.tum>
 
 #include <fstream>
 #include <iomanip>
@@ -28,9 +30,7 @@
 #include "fusion/ins_fusion.h"
 
 DEFINE_uint32(seed, 1, "random seed of the GPS noise");
-DEFINE_double(min_start_speed_mps, 0.5, "GPS speed that starts the yaw selection (walking pace)");
-DEFINE_double(max_imu_gap_seconds, 1.1,
-              "longer IMU gaps restart the yaw selection (the lens bags drop 1 s every 2-4 s)");
+DEFINE_double(gps_noise_scale, 0.1, "scales the drift and white noise of the GPS");
 DEFINE_bool(constrain_vertical_velocity, false,
             "level-floor prior: near-zero world vertical velocity while moving");
 
@@ -49,8 +49,13 @@ int Run(const std::string& dataset_path, const std::string& output_path) {
   }
   const int zone = math::UtmZone(kOrigin.y());
   const Eigen::Vector3d origin_utm = math::GeodeticToUtm(kOrigin, zone);
+  simulation::GpsNoiseOptions noise;
+  noise.horizontal_walk *= FLAGS_gps_noise_scale;
+  noise.vertical_walk *= FLAGS_gps_noise_scale;
+  noise.horizontal_white_std *= FLAGS_gps_noise_scale;
+  noise.vertical_white_std *= FLAGS_gps_noise_scale;
   const std::vector<sensor::GpsData> gps =
-      simulation::AddGpsNoise(dataset->gps, kOrigin, simulation::GpsNoiseOptions{}, FLAGS_seed);
+      simulation::AddGpsNoise(dataset->gps, kOrigin, noise, FLAGS_seed);
   std::cout << "imu " << dataset->imu.size() << ", gps " << gps.size() << "\n";
 
   std::ofstream output(output_path);
@@ -64,8 +69,7 @@ int Run(const std::string& dataset_path, const std::string& output_path) {
   // a fix is applied before the IMU sample it precedes
   InsFusionOptions options;
   options.constrain_vertical_velocity = FLAGS_constrain_vertical_velocity;
-  options.min_start_speed_mps = FLAGS_min_start_speed_mps;
-  options.max_imu_gap_seconds = FLAGS_max_imu_gap_seconds;
+  options.forward = dataset->forward;
   InsFusion fusion(options);
   size_t gps_index = 0;
   int pose_count = 0;
@@ -91,11 +95,7 @@ int Run(const std::string& dataset_path, const std::string& output_path) {
            << " " << rotation.z() << " " << rotation.w() << "\n";
     ++pose_count;
   }
-  if (!fusion.initialized()) {
-    std::cerr << "never moves at " << FLAGS_min_start_speed_mps
-              << " m/s between fixes, or no yaw hypothesis selected\n";
-    return 1;
-  }
+  // the GPS lines also when never initialized: other methods are run on them
   for (const sensor::GpsData& fix : gps) {
     const Eigen::Vector3d position =
         math::GeodeticToUtm({fix.latitude_deg, fix.longitude_deg, fix.altitude_m}, zone) -
@@ -103,6 +103,10 @@ int Run(const std::string& dataset_path, const std::string& output_path) {
     output << "# gps " << std::setprecision(6) << 1e-9 * static_cast<double>(fix.timestamp_ns)
            << std::setprecision(4) << " " << position.x() << " " << position.y() << " "
            << position.z() << " " << fix.satellite_count << "\n";
+  }
+  if (pose_count == 0) {
+    std::cerr << "never initialized (fewer than two usable GPS fixes)\n";
+    return 1;
   }
   std::cout << "wrote " << pose_count << " poses to " << output_path << ", initialized after "
             << std::setprecision(1) << initialized_s << " s\n"
@@ -115,7 +119,7 @@ int Run(const std::string& dataset_path, const std::string& output_path) {
 }  // namespace mapmind::fusion
 
 int main(int argc, char** argv) {
-  gflags::SetUsageMessage("[--seed N] [--min_start_speed_mps V] <dataset> <out.tum>");
+  gflags::SetUsageMessage("[--seed N] [--gps_noise_scale S] <dataset> <out.tum>");
   gflags::ParseCommandLineFlags(&argc, &argv, /*remove_flags=*/true);
   if (argc != 3) {
     gflags::ShowUsageWithFlagsRestrict(argv[0], "fusion/run_dataset_main");

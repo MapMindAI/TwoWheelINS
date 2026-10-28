@@ -24,6 +24,9 @@ Each dataset gets:
            by linear interpolation of gt.txt; no noise. Skipped where the two neighbouring
            ground-truth poses are more than MAX_GT_GAP_S apart.
   gt.txt   TUM world_from_imu, at most 100 Hz.
+  forward.txt  x y z: the walking direction in the IMU frame (unit vector), the mean over
+           FORWARD_STEP_S steps of the ground-truth horizontal velocity direction rotated into
+           the IMU frame, where faster than FORWARD_MIN_SPEED_MPS.
 --images gets <group>.png per group of datasets (the name up to the first underscore) for the wiki
 Benchmark-Datasets page: one panel per dataset in name order, PANELS_PER_ROW per row at a common
 scale, each a top-down view of its own map point cloud within MAP_MARGIN_M of the trajectory
@@ -78,6 +81,8 @@ OUTPUT_PERIOD_S = 0.01  # 100 Hz
 TRAJECTORY_TRIM_S = 0.5
 GPS_PERIOD_S = 1.0
 MAX_GT_GAP_S = 2.0
+FORWARD_STEP_S = 0.5
+FORWARD_MIN_SPEED_MPS = 0.5
 MAX_PANEL_PIXELS = 700
 PANELS_PER_ROW = 3
 MAP_MARGIN_M = 5.0
@@ -229,6 +234,37 @@ def write_gps(gt, path):
             f.write(f"{t:.6f} {p[0]:.4f} {p[1]:.4f} {p[2]:.4f}\n")
             written += 1
     return written, skipped
+
+
+def write_forward(gt, path):
+    """Writes the walking direction in the IMU frame; returns its median deviation (deg)."""
+    times = np.arange(gt[0, 0] + FORWARD_STEP_S, gt[-1, 0] - FORWARD_STEP_S, FORWARD_STEP_S)
+    before = np.column_stack([np.interp(times - FORWARD_STEP_S / 2, gt[:, 0], gt[:, k])
+                              for k in (1, 2)])
+    after = np.column_stack([np.interp(times + FORWARD_STEP_S / 2, gt[:, 0], gt[:, k])
+                             for k in (1, 2)])
+    velocity = (after - before) / FORWARD_STEP_S
+    speed = np.linalg.norm(velocity, axis=1)
+    # the ground truth is linearly interpolated over its gaps, which would fake a straight walk
+    nearest_gap = np.interp(times, gt[1:, 0], np.diff(gt[:, 0]))
+    directions = []
+    for t, v, s, gap in zip(times, velocity, speed, nearest_gap):
+        if s < FORWARD_MIN_SPEED_MPS or gap > FORWARD_STEP_S:
+            continue
+        pose = gt[min(np.searchsorted(gt[:, 0], t), len(gt) - 1)]
+        world_direction = np.array([v[0] / s, v[1] / s, 0.0])
+        directions.append(rotation_matrix(pose[4:8]).T @ world_direction)
+    directions = np.array(directions)
+    forward = directions.mean(axis=0)
+    forward /= np.linalg.norm(forward)
+    deviation = np.degrees(np.arccos(np.clip(directions @ forward, -1.0, 1.0)))
+    with open(path, "w") as f:
+        f.write("# walking direction in the IMU frame (unit vector): mean of the ground-truth "
+                f"horizontal velocity direction rotated into the IMU frame over {len(directions)} "
+                f"{FORWARD_STEP_S} s steps faster than {FORWARD_MIN_SPEED_MPS} m/s, median "
+                f"deviation {np.median(deviation):.1f} deg\n# x y z\n")
+        f.write(" ".join(f"{v:.6f}" for v in forward) + "\n")
+    return np.median(deviation)
 
 
 def exp_so3(vector):
@@ -531,6 +567,7 @@ def main():
                       "at both ends, thinned to 100 Hz\n")
         write_gt(gt, header, os.path.join(out_dir, "gt.txt"))
         written, skipped = write_gps(gt, os.path.join(out_dir, "gps.txt"))
+        forward_deviation = write_forward(gt, os.path.join(out_dir, "forward.txt"))
         xyz, rgb = map_points(ply, world_from_map, gt)
         groups.setdefault(group_name(name), []).append((name, (xyz, rgb, gt)))
         gravity, gyro_error = check(imu, gt)
@@ -539,7 +576,8 @@ def main():
               f"({imu[-1, 0] - imu[0, 0]:.1f} s, {gaps} gaps > 0.5 s), {len(gt)} gt "
               f"({gt[-1, 0] - gt[0, 0]:.1f} s), {written} GPS ({skipped} skipped in gt gaps)"
               f"\n  check: gravity in world {np.round(gravity, 2)} m/s^2, "
-              f"gyro vs gt rotation error {100 * gyro_error:.1f} %", flush=True)
+              f"gyro vs gt rotation error {100 * gyro_error:.1f} %, walking direction median "
+              f"deviation {forward_deviation:.1f} deg", flush=True)
 
     every_name = [name for name, _, _, _ in jobs]
     for group, members in sorted(groups.items()):

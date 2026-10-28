@@ -18,8 +18,8 @@ constexpr double kGravity = 9.8099;
 constexpr int64_t kImuPeriodNs = 10'000'000;  // 100 Hz
 constexpr int kWheelEvery = 10;               // 10 Hz
 constexpr int kGpsEvery = 100;                // 1 Hz
-// Yaw hypotheses start at 6 s (two fixes at >= 3 m/s) and one is selected 10 fixes later.
-constexpr double kSettledSeconds = 16.0;
+// The filter starts at the 3 s fix (levelling, then two fixes) and settles.
+constexpr double kSettledSeconds = 10.0;
 
 struct Motion {
   double speed;
@@ -36,6 +36,11 @@ Motion Ride(double t) {
     return {t - 2.0, 1.0, 0.0};
   }
   return {5.0, 0.0, 0.2};
+}
+
+// arbitrary tilted IMU mount: body to vehicle (x forward, y left, z up)
+Sophus::SO3d VehicleFromBody() {
+  return Sophus::SO3d::rotX(1.1) * Sophus::SO3d::rotZ(0.4) * Sophus::SO3d::rotY(0.2);
 }
 
 // Geodetic position of a UTM offset from `origin`, by inverting the GeodeticToUtm Jacobian
@@ -56,7 +61,15 @@ struct Simulation {
   std::function<Motion(double)> motion = Ride;
   double duration_s = 40.0;
   int satellite_count = 8;
-  InsFusionOptions options;
+  // rad/s about the vehicle vertical: only GPS makes it (and heading) observable
+  double gyroscope_bias = 0.01;
+  // errors count from this time on
+  double settled_s = kSettledSeconds;
+  InsFusionOptions options = [] {
+    InsFusionOptions options;
+    options.forward = VehicleFromBody().inverse() * Eigen::Vector3d::UnitX();
+    return options;
+  }();
   // Returns the GPS position error (UTM, m) at `t`, or nullopt to drop the fix.
   std::function<std::optional<Eigen::Vector3d>(double)> gps_error = [](double) {
     return Eigen::Vector3d::Zero();
@@ -67,21 +80,19 @@ struct Simulation {
 
 struct Errors {
   int pose_count = 0;
-  // times the filter fell back from initialized to yaw selection
+  // times the filter fell back from initialized to the start from two fixes
   int rearm_count = 0;
   std::optional<int> utm_zone;
-  // after kSettledSeconds, in [error_from_s, error_to_s)
+  // after Simulation::settled_s, in [error_from_s, error_to_s)
   double max_position = 0.0;
   double max_height = 0.0;
   double max_rotation = 0.0;
 };
 
 Errors Simulate(const Simulation& simulation, double error_from_s, double error_to_s) {
-  // arbitrary tilted IMU mount (unknown to the filter): body to vehicle (x forward, y left, z up)
-  const Sophus::SO3d vehicle_from_body =
-      Sophus::SO3d::rotX(1.1) * Sophus::SO3d::rotZ(0.4) * Sophus::SO3d::rotY(0.2);
-  // gyroscope bias about the vehicle vertical: only GPS makes it (and heading) observable
-  const Eigen::Vector3d gyroscope_bias = vehicle_from_body.inverse() * Eigen::Vector3d(0, 0, 0.01);
+  const Sophus::SO3d vehicle_from_body = VehicleFromBody();
+  const Eigen::Vector3d gyroscope_bias =
+      vehicle_from_body.inverse() * Eigen::Vector3d(0, 0, simulation.gyroscope_bias);
   // the simulated world frame is the UTM grid, offset to the first fix
   const Eigen::Vector3d origin(22.787839, 113.5210145, 13.0);
   const int zone = math::UtmZone(origin.y());
@@ -142,7 +153,7 @@ Errors Simulate(const Simulation& simulation, double error_from_s, double error_
       continue;
     }
     ++errors.pose_count;
-    if (t < kSettledSeconds || t < error_from_s || t >= error_to_s) {
+    if (t < simulation.settled_s || t < error_from_s || t >= error_to_s) {
       continue;
     }
     const Sophus::SE3d pose = fusion.pose();
@@ -161,9 +172,37 @@ TEST(InsFusion, TracksSimulatedRide) {
   EXPECT_EQ(errors.utm_zone, math::UtmZone(113.5210145));
   EXPECT_GT(errors.pose_count, 20 * 100);
   EXPECT_LT(errors.max_position, 0.5);
-  // Yaw is observable only while the speed changes: in a steady turn a yaw error looks like a
-  // body-fixed accelerometer bias, so the error left after yaw selection decays slowly.
+  // The gyroscope bias (starting at zero) is learnt from GPS only, slowly in a steady turn.
+  EXPECT_LT(errors.max_rotation, 0.25);
+}
+
+TEST(InsFusion, TracksSimulatedRideWithoutGyroscopeBias) {
+  Simulation simulation;
+  simulation.gyroscope_bias = 0.0;
+  const Errors errors = Simulate(simulation, 0.0, 40.0);
+  EXPECT_LT(errors.max_position, 0.5);
   EXPECT_LT(errors.max_rotation, 0.15);
+}
+
+TEST(InsFusion, StartsAtSecondFix) {
+  Simulation simulation;
+  // without a gyroscope bias to learn, the rotation error from the start on is the start yaw's
+  simulation.gyroscope_bias = 0.0;
+  simulation.settled_s = 0.0;
+  const Errors errors = Simulate(simulation, 0.0, 40.0);
+  // levelled at 1 s, fixes at 2 s and 3 s
+  EXPECT_EQ(errors.pose_count, 37 * 100 + 1);
+  EXPECT_LT(errors.max_position, 1.0);
+  EXPECT_LT(errors.max_rotation, 0.03);
+}
+
+TEST(InsFusion, StartsWhileTurning) {
+  Simulation simulation;
+  // turn in place at 0.3 rad/s for the first 2 s instead of standing still
+  simulation.motion = [](double t) { return t < 2.0 ? Motion{0.0, 0.0, 0.3} : Ride(t); };
+  const Errors errors = Simulate(simulation, 0.0, 40.0);
+  EXPECT_LT(errors.max_position, 0.5);
+  EXPECT_LT(errors.max_rotation, 0.25);
 }
 
 TEST(InsFusion, HoldsStillWhileParkedGpsDrifts) {
@@ -187,6 +226,7 @@ TEST(InsFusion, HoldsStillWhileParkedGpsDrifts) {
 
 TEST(InsFusion, IgnoresGpsAltitudeDriftOnLevelRoad) {
   Simulation simulation;
+  simulation.options.constrain_vertical_velocity = true;
   // the GPS altitude climbs at 1 m/s on a level road
   simulation.gps_error = [](double t) -> std::optional<Eigen::Vector3d> {
     return Eigen::Vector3d(0.0, 0.0, std::max(t - 20.0, 0.0));
@@ -198,14 +238,15 @@ TEST(InsFusion, IgnoresGpsAltitudeDriftOnLevelRoad) {
   EXPECT_GT(Simulate(simulation, 20.0, 40.0).max_height, 12.0);
 }
 
-TEST(InsFusion, RestartsYawSelectionAfterImuGap) {
+TEST(InsFusion, RestartsAfterImuGap) {
   Simulation simulation;
   simulation.duration_s = 60.0;
   simulation.imu_dropped = [](double t) { return t >= 25.0 && t < 26.0; };
   const Errors errors = Simulate(simulation, 45.0, 60.0);
   EXPECT_EQ(errors.rearm_count, 1);
   EXPECT_LT(errors.max_position, 0.5);
-  EXPECT_LT(errors.max_rotation, 0.15);
+  // restarted in a steady turn, with the gyroscope bias still unsettled
+  EXPECT_LT(errors.max_rotation, 0.4);
 }
 
 TEST(InsFusion, IntegratesImuGapShorterThanMaximum) {
@@ -220,7 +261,7 @@ TEST(InsFusion, IntegratesImuGapShorterThanMaximum) {
   const Errors errors = Simulate(simulation, 20.0, 60.0);
   EXPECT_EQ(errors.rearm_count, 0);
   EXPECT_LT(errors.max_position, 1.0);
-  EXPECT_LT(errors.max_rotation, 0.15);
+  EXPECT_LT(errors.max_rotation, 0.25);
 }
 
 TEST(InsFusion, DropsAltitudeOutliers) {

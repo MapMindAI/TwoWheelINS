@@ -6,7 +6,6 @@
 
 #include <cstdint>
 #include <optional>
-#include <vector>
 
 #include <Eigen/Core>
 
@@ -20,13 +19,12 @@ namespace mapmind::fusion {
 
 struct InsFusionOptions {
   // level-road prior: near-zero world vertical velocity while moving
-  bool constrain_vertical_velocity = true;
-  // GPS speed between two fixes that starts the yaw selection (m/s); 3 m/s for a vehicle, lower
-  // for a walk with accurate GPS
-  double min_start_speed_mps = 3.0;
-  // A longer IMU gap restarts the yaw selection; a shorter one is integrated with the first sample
-  // after it (INSLIB's max_prediction_time_sec).
+  bool constrain_vertical_velocity = false;
+  // A longer IMU gap restarts the initialization, like INSLIB (its max_prediction_time_sec); a
+  // shorter one is integrated with the first sample after it.
   double max_imu_gap_seconds = 0.5;
+  // direction of travel in the IMU frame (unit vector)
+  Eigen::Vector3d forward = Eigen::Vector3d::UnitX();
 };
 
 // IMU + GPS INS on the KfcoreIns filter: IMU propagation and GPS position updates, plus velocity
@@ -35,13 +33,12 @@ struct InsFusionOptions {
 // velocity while moving (see InsFusionOptions).
 // A GPS altitude whose innovation fails a chi-square gate is dropped.
 //
-// Feed samples in timestamp order. The first second of IMU data must be (nearly) static: its mean
-// specific force levels roll and pitch, its mean angular velocity is the initial gyroscope bias.
-// Yaw needs no knowledge of the IMU mount: once two GPS fixes give a velocity of at least
-// `min_start_speed_mps`, filters start at
-// evenly spaced yaw hypotheses and, after a few more fixes, the one whose GPS innovations fit best
-// is kept. Yaw shows in the GPS track only while the vehicle speeds up, brakes or turns.
-// After an IMU gap over `max_imu_gap_seconds` the yaw selection restarts from the last attitude.
+// Feed samples in timestamp order. The mean specific force of the first second of IMU data levels
+// roll and pitch; the gyroscope bias starts at zero (the start need not be static).
+// The filter starts at the second usable GPS fix after levelling: position from that fix, velocity
+// from the step between the two, and yaw turning `forward`, integrated in the levelled yaw-free
+// frame over the step, onto the step's course. After an IMU gap over `max_imu_gap_seconds` it
+// starts again from the next two fixes, keeping the last attitude.
 class InsFusion {
  public:
   InsFusion() : InsFusion(InsFusionOptions()) {}
@@ -54,7 +51,7 @@ class InsFusion {
   // Only used to detect standstill.
   void AddWheelSpeed(const sensor::WheelSpeedData& wheel_speed);
 
-  // True once a yaw hypothesis is selected; pose() is valid from then on.
+  // True once the filter started; pose() is valid from then on.
   bool initialized() const { return initialized_; }
   // IMU pose: body to UTM (easting, northing, altitude) in utm_zone().
   Sophus::SE3d pose() const;
@@ -64,23 +61,25 @@ class InsFusion {
   const Eigen::Vector3d& accelerometer_bias() const { return filter_.accelerometer_bias(); }
 
  private:
-  struct YawHypothesis {
-    KfcoreIns filter;
-    // sum over fixes of the negative log-likelihood of the innovation (up to a constant)
-    double cost = 0.0;
+  // the first of the two fixes the filter starts from
+  struct FirstFix {
+    int64_t timestamp_ns;
+    // UTM, relative to origin_ (m), and its horizontal variance (m^2)
+    Eigen::Vector3d gps_position;
+    double gps_variance;
   };
 
   bool IsUsable(const sensor::GpsData& gps) const;
   // UTM position of `gps` relative to origin_ (m).
   Eigen::Vector3d LocalPosition(const sensor::GpsData& gps) const;
-  void StartYawHypotheses(const sensor::GpsData& gps);
-  void UpdateYawHypotheses(const Eigen::Vector3d& position, const Eigen::Matrix3d& gps_covariance);
+  // Keeps the first fix, starts the filter at the second.
+  void Start(const sensor::GpsData& gps);
   // Returns the innovation (UTM, m).
   Eigen::Vector3d UpdateGpsPosition(const Eigen::Vector3d& position,
                                     const Eigen::Matrix3d& gps_covariance);
   // Inside an IMU gap, predicts the filters to `timestamp_ns` with the last IMU sample.
   void PredictToMeasurement(int64_t timestamp_ns);
-  // Back to yaw selection, keeping the attitude and gyroscope bias.
+  // Back to the start from two fixes, keeping the attitude and gyroscope bias.
   void Rearm();
   bool IsStationary(int64_t timestamp_ns) const;
   // Zero-velocity update while stationary, level-road prior while moving.
@@ -89,18 +88,17 @@ class InsFusion {
   InsFusionOptions options_;
   KfcoreIns filter_;
   bool initialized_ = false;
-  std::vector<YawHypothesis> hypotheses_;
-  int hypothesis_fix_count_ = 0;
+  std::optional<FirstFix> first_fix_;
 
-  // levelling and pre-initialization attitude
+  // levelling, and the pre-initialization attitude and forward integral (levelled frame, s)
   int64_t first_imu_timestamp_ns_ = 0;
   int64_t last_imu_timestamp_ns_ = 0;
   std::optional<sensor::ImuData> last_imu_;
   int static_sample_count_ = 0;
   Eigen::Vector3d static_acc_sum_ = Eigen::Vector3d::Zero();
-  Eigen::Vector3d static_gyro_sum_ = Eigen::Vector3d::Zero();
   std::optional<Sophus::SO3d> attitude_;
-  // mean angular velocity while static (rad/s, body)
+  Eigen::Vector3d integrated_forward_ = Eigen::Vector3d::Zero();
+  // rad/s, body: zero until a restart carries the filter's estimate
   Eigen::Vector3d gyroscope_bias_ = Eigen::Vector3d::Zero();
 
   std::optional<int> utm_zone_;
