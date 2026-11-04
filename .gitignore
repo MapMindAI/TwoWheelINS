@@ -5,7 +5,7 @@
 /compile_commands.json
 /.cache/
 
-# Local datasets/captures (MOKUKU recordings) and run outputs
+# Local datasets/captures (sensor recordings) and run outputs
 /data/
 /output/
 log*.txt

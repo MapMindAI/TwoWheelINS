@@ -42,6 +42,7 @@ cc_binary(
     deps = [
         ":ins_fusion",
         "//common/math:geodesy",
+        "//common/reader:binary_record_reader",
         "//common/reader:txt_record_reader",
         "@gflags",
     ],

@@ -32,6 +32,11 @@ cc_test(
 )
 
 cc_library(
+    name = "barometer_data",
+    hdrs = ["barometer_data.h"],
+)
+
+cc_library(
     name = "wheel_speed_data",
     hdrs = ["wheel_speed_data.h"],
 )

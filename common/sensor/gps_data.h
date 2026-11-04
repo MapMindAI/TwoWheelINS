@@ -19,6 +19,8 @@ struct GpsData {
   double altitude_m;
   double ground_speed_mps;
   int satellite_count;
+  // age of the fix at timestamp_ns (binary records); 0 in text records
+  int64_t fix_age_ms = 0;
 };
 
 // GPS position covariance (UTM easting, northing, altitude; m^2) for a fix from
