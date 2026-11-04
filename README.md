@@ -15,7 +15,7 @@ The previous iterated Kalman filter on manifolds (ikfom, GPL-2.0) is in release
 
 ```
 ├── fusion/           # KfcoreIns (error-state INS on KFCore), InsFusion (IMU + GPS, wheel speed for standstill), ins_fusion_main, run_dataset_main
-├── tools/            # WebGL/Leaflet trajectory viewer for TUM output, trajectory error and benchmark HTML report
+├── tools/            # WebGL/Leaflet trajectory viewer for TUM output, trajectory error, benchmark HTML report, barometer height plot
 ├── third_party/      # vendored code: KFCore UDU Kalman filter (C)
 ├── benchmark/        # run KF-GINS / INSLIB on a record (fetched at run time); build datasets
 ├── doc/              # design notes: InsFusion initialization, binary record format
@@ -51,6 +51,14 @@ bazel build //fusion:ins_fusion_main
 bazel-bin/fusion/ins_fusion_main data/mobili_2.record output/mobili_2.tum
 ```
 
+For a binary record with long IMU samples, `tools/barometer_height.py` plots the height change from
+pressure, with the GPS altitude coloured by satellite count if the record has GPS (python3, numpy,
+matplotlib):
+
+```bash
+tools/barometer_height.py benchmark/datasets/barometer_elevator-17f/record.bin output/barometer_elevator-17f.png
+```
+
 `--constrain_vertical_velocity` adds a level-road prior (near-zero vertical velocity while moving).
 It holds the height when single-solution GPS altitude wanders tens of metres; leave it off for
 hilly routes or accurate (RTK) altitude.
@@ -75,6 +83,10 @@ top-down image per group of datasets (trajectories over their maps) under
 `output/benchmark/dataset_maps/`. The
 datasets are listed in the [wiki](https://github.com/MapMindAI/TwoWheelINS/wiki/Benchmark-Datasets).
 It needs ROS 2 (`rosbag2_py`).
+
+`benchmark/datasets/barometer_*/record.bin` are binary records with a barometer over known floors
+(no ground-truth poses; the dataset scripts skip them), described in the
+[wiki](https://github.com/MapMindAI/TwoWheelINS/wiki/Barometer-Height-Check).
 
 ```bash
 source /opt/ros/jazzy/setup.bash && /usr/bin/python3 benchmark/make_datasets.py

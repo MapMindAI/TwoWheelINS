@@ -18,6 +18,7 @@ echo "InsFusion"
 printf '%-48s %14s %14s %10s\n' dataset "horizontal_m" "vertical_m" "yaw_deg"
 printf '%-48s %14s %14s %10s\n' "" "median/p95" "median/p95" "median"
 for dataset in benchmark/datasets/*/; do
+  [ -f "${dataset}gt.txt" ] || continue  # barometer records have no ground truth
   name=$(basename "${dataset}")
   output="${runs}/${name}.tum"
   if ! bazel-bin/fusion/run_dataset_main "$@" "${dataset}" "${output}" >/dev/null 2>&1; then

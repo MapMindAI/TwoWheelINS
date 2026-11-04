@@ -27,6 +27,7 @@ cd "$REPO"
 printf '%-48s %14s %14s %10s\n' dataset "horizontal_m" "vertical_m" "yaw_deg"
 printf '%-48s %14s %14s %10s\n' "" "median/p95" "median/p95" "median"
 for dataset in benchmark/datasets/*/; do
+  [ -f "${dataset}gt.txt" ] || continue  # barometer records have no ground truth
   name=$(basename "${dataset}")
   if ! grep -q '^# gps ' "$RUNS/${name}.tum" 2> /dev/null; then
     printf '%-48s %s\n' "${name}" "no InsFusion run (its GPS is reused)"
