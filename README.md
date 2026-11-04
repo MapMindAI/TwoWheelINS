@@ -1,7 +1,7 @@
 # TwoWheelINS
 
 IMU + GPS inertial navigation (INS) fusion for a two-wheel platform: estimate the 6-DoF pose from
-data recorded with MOKUKU.
+recorded IMU and GPS data.
 
 The fusion core is a 15-state error-state INS after [INSLIB](https://github.com/jnz/INSLIB)'s
 design on the float, static-memory UDU Kalman filter from [KFCore](https://github.com/jnz/KFCore)
@@ -18,12 +18,12 @@ The previous iterated Kalman filter on manifolds (ikfom, GPL-2.0) is in release
 ├── tools/            # WebGL/Leaflet trajectory viewer for TUM output, trajectory error and benchmark HTML report
 ├── third_party/      # vendored code: KFCore UDU Kalman filter (C)
 ├── benchmark/        # run KF-GINS / INSLIB on a record (fetched at run time); build datasets
-├── doc/              # design notes: InsFusion initialization
-├── common/           # shared helpers: so3/se3 Jacobians, covariance and UTM projection (math/), sensor data types (sensor/), record and benchmark dataset readers (reader/), IMU simulation and GPS noise (simulation/)
+├── doc/              # design notes: InsFusion initialization, binary record format
+├── common/           # shared helpers: so3/se3 Jacobians, covariance and UTM projection (math/), sensor data types (sensor/), binary and text record and benchmark dataset readers (reader/), IMU simulation and GPS noise (simulation/)
 ├── toolchain/        # aarch64 platform + cross-compile cc_toolchain
 ├── .github/workflows # CI: bazel test //...
 ├── MODULE.bazel      # external deps (Bazel Central Registry)
-└── data/             # local MOKUKU captures (git-ignored)
+└── data/             # local sensor captures (git-ignored)
 ```
 
 Design notes (INS pipeline comparison, results, ESP32-S3 feasibility) are in the
@@ -39,7 +39,7 @@ bazel test //...                       # host build + all tests
 bazel build --config=aarch64 //...     # cross-compile for arm64 (needs gcc-aarch64-linux-gnu)
 ```
 
-Run the fusion on a MOKUKU text record; it writes the IMU pose (UTM easting, northing, altitude)
+Run the fusion on a record, binary ([format](doc/binary_record_format.md)) or text; it writes the IMU pose (UTM easting, northing, altitude)
 for every IMU sample in TUM format (`t_s x y z qx qy qz qw`). Open `tools/trajectory_viewer.html`
 in a browser and pick or drop the file: it draws the trajectory in 3D (WebGL) over Esri World Imagery
 and on a 2D map (Leaflet). The imagery needs network; without it the 3D view falls back to a grid.

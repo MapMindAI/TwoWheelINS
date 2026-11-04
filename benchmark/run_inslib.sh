@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Copyright 2026 MapMind
 # SPDX-License-Identifier: BSD-3-Clause
-# Runs INSLIB (https://github.com/jnz/INSLIB, AGPL-3.0) on a MOKUKU record and writes
+# Runs INSLIB (https://github.com/jnz/INSLIB, AGPL-3.0) on a text record and writes
 # output/<record>_inslib.tum. INSLIB is fetched and built under output/benchmark, never committed.
 #
 # usage: benchmark/run_inslib.sh data/mobili_2.record [--mount-yaw-deg 40] [--outage 560:10 ...]

@@ -1,11 +1,11 @@
 // Copyright 2026 MapMind
 // SPDX-License-Identifier: BSD-3-Clause
 
-// Runs InsFusion on a MOKUKU text record and writes the IMU pose in UTM (easting, northing,
-// altitude) for every IMU sample after initialization, in TUM format: t_s x y z qx qy qz qw.
-// A leading "# UTM zone <number><N|S>" comment lets tools/trajectory_viewer.html put it on a map;
-// trailing "# gps t_s easting_m northing_m altitude_m satellites" comments carry the record's GPS
-// fixes for the viewer to overlay.
+// Runs InsFusion on a binary or text record and writes the IMU pose in UTM (easting,
+// northing, altitude) for every IMU sample after initialization, in TUM format: t_s x y z qx qy qz
+// qw. A leading "# UTM zone <number><N|S>" comment lets tools/trajectory_viewer.html put it on a
+// map; trailing "# gps t_s easting_m northing_m altitude_m satellites" comments carry the record's
+// GPS fixes for the viewer to overlay.
 //
 // Usage: ins_fusion_main [--constrain_vertical_velocity] <record> <output.tum>
 
@@ -15,11 +15,13 @@
 #include <iostream>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <gflags/gflags.h>
 
 #include "common/math/geodesy.h"
+#include "common/reader/binary_record_reader.h"
 #include "common/reader/txt_record_reader.h"
 #include "fusion/ins_fusion.h"
 
@@ -37,16 +39,34 @@ double Percentile(std::vector<double> values, double fraction) {
   return values[static_cast<size_t>(fraction * static_cast<double>(values.size() - 1))];
 }
 
+// Reads a binary record (doc/binary_record_format.md) or, without its header, a text record.
+std::optional<reader::TxtRecord> ReadRecord(const std::string& path) {
+  if (!reader::IsBinaryRecord(path)) {
+    std::optional<reader::TxtRecord> record = reader::ReadTxtRecord(path);
+    if (record) {
+      std::cout << "text record, skipped lines " << record->skipped_lines << "\n";
+    }
+    return record;
+  }
+  std::optional<reader::BinaryRecord> binary = reader::ReadBinaryRecord(path);
+  if (!binary) {
+    return std::nullopt;
+  }
+  std::cout << "binary record, crc errors " << binary->crc_errors << ", skipped bytes "
+            << binary->skipped_bytes << "\n";
+  return reader::TxtRecord{std::move(binary->imu), std::move(binary->gps),
+                           std::move(binary->wheel_speed), 0};
+}
+
 int Run(const std::string& record_path, const std::string& output_path) {
-  std::optional<reader::TxtRecord> record = reader::ReadTxtRecord(record_path);
+  std::optional<reader::TxtRecord> record = ReadRecord(record_path);
   if (!record) {
-    std::cerr << "cannot open " << record_path << "\n";
+    std::cerr << "cannot read " << record_path << "\n";
     return 1;
   }
   const int removed_imu = reader::RemoveCorruptImuSamples(&record->imu);
   std::cout << "imu " << record->imu.size() << " (removed " << removed_imu << " corrupt), gps "
-            << record->gps.size() << ", wheel speed " << record->wheel_speed.size()
-            << ", skipped lines " << record->skipped_lines << "\n";
+            << record->gps.size() << ", wheel speed " << record->wheel_speed.size() << "\n";
 
   std::ofstream output(output_path);
   if (!output.is_open()) {
@@ -94,7 +114,8 @@ int Run(const std::string& record_path, const std::string& output_path) {
   }
 
   if (!fusion.initialized()) {
-    std::cerr << "vehicle never moves fast enough to initialize heading\n";
+    std::cerr << (gps.empty() ? "record has no GPS fixes\n"
+                              : "vehicle never moves fast enough to initialize heading\n");
     return 1;
   }
   for (const sensor::GpsData& fix : gps) {

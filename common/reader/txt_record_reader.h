@@ -22,7 +22,7 @@ struct TxtRecord {
   int skipped_lines = 0;
 };
 
-// Reads a MOKUKU text record (one sample per line, timestamps in microseconds):
+// Reads a text record (one sample per line, timestamps in microseconds):
 //   imu <t_us> <acc_x> <acc_y> <acc_z> <gyr_x> <gyr_y> <gyr_z>   (m/s^2, rad/s, body frame)
 //   gps <t_us> <status> <lat_deg> <lon_deg> <alt_m> <ground_speed_mps> <satellites>
 //   speed <t_us> <wheel_speed_kmh>                               (255 = invalid)

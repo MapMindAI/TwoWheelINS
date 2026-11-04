@@ -41,3 +41,25 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_library(
+    name = "binary_record_reader",
+    srcs = ["binary_record_reader.cc"],
+    hdrs = ["binary_record_reader.h"],
+    deps = [
+        "//common/sensor:barometer_data",
+        "//common/sensor:gps_data",
+        "//common/sensor:imu_data",
+        "//common/sensor:wheel_speed_data",
+        "@eigen",
+    ],
+)
+
+cc_test(
+    name = "binary_record_reader_test",
+    srcs = ["binary_record_reader_test.cc"],
+    deps = [
+        ":binary_record_reader",
+        "@googletest//:gtest_main",
+    ],
+)
