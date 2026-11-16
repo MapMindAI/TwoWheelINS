@@ -7,13 +7,14 @@
 // map; trailing "# gps t_s easting_m northing_m altitude_m satellites" comments carry the record's
 // GPS fixes for the viewer to overlay.
 //
-// Usage: ins_fusion_main [--constrain_vertical_velocity] <record> <output.tum>
+// Usage: ins_fusion_main [--constrain_vertical_velocity] [--forward=x,y,z] <record> <output.tum>
 
 #include <algorithm>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -27,6 +28,8 @@
 
 DEFINE_bool(constrain_vertical_velocity, false,
             "level-road prior: near-zero world vertical velocity while moving");
+DEFINE_string(forward, "1,0,0",
+              "direction of travel in the IMU frame, x,y,z (MOKUKU II, mounted X right: 0,1,0)");
 
 namespace mapmind::fusion {
 namespace {
@@ -58,6 +61,18 @@ std::optional<reader::TxtRecord> ReadRecord(const std::string& path) {
                            std::move(binary->wheel_speed), 0};
 }
 
+std::optional<Eigen::Vector3d> ParseVector(const std::string& text) {
+  Eigen::Vector3d vector;
+  char comma0 = 0;
+  char comma1 = 0;
+  std::istringstream stream(text);
+  stream >> vector.x() >> comma0 >> vector.y() >> comma1 >> vector.z();
+  if (stream.fail() || comma0 != ',' || comma1 != ',' || vector.norm() == 0.0) {
+    return std::nullopt;
+  }
+  return vector.normalized();
+}
+
 int Run(const std::string& record_path, const std::string& output_path) {
   std::optional<reader::TxtRecord> record = ReadRecord(record_path);
   if (!record) {
@@ -78,6 +93,12 @@ int Run(const std::string& record_path, const std::string& output_path) {
   // Merge the streams by timestamp; a measurement is applied before the IMU sample it precedes.
   InsFusionOptions options;
   options.constrain_vertical_velocity = FLAGS_constrain_vertical_velocity;
+  const std::optional<Eigen::Vector3d> forward = ParseVector(FLAGS_forward);
+  if (!forward) {
+    std::cerr << "bad --forward " << FLAGS_forward << "\n";
+    return 1;
+  }
+  options.forward = *forward;
   InsFusion fusion(options);
   const std::vector<sensor::GpsData>& gps = record->gps;
   const std::vector<sensor::WheelSpeedData>& wheel_speed = record->wheel_speed;
@@ -143,7 +164,8 @@ int Run(const std::string& record_path, const std::string& output_path) {
 }  // namespace mapmind::fusion
 
 int main(int argc, char** argv) {
-  gflags::SetUsageMessage("[--constrain_vertical_velocity] <record> <output.tum>");
+  gflags::SetUsageMessage(
+      "[--constrain_vertical_velocity] [--forward=x,y,z] <record> <output.tum>");
   gflags::ParseCommandLineFlags(&argc, &argv, /*remove_flags=*/true);
   if (argc != 3) {
     gflags::ShowUsageWithFlagsRestrict(argv[0], "fusion/ins_fusion_main");

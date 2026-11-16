@@ -63,6 +63,9 @@ tools/barometer_height.py benchmark/datasets/barometer_elevator-17f/record.bin o
 It holds the height when single-solution GPS altitude wanders tens of metres; leave it off for
 hilly routes or accurate (RTK) altitude.
 
+`--forward=x,y,z` sets the direction of travel in the IMU frame (default `1,0,0`); MOKUKU II mounts
+its IMU with X right and Y forward, so use `--forward=0,1,0`.
+
 To compare against [KF-GINS](https://github.com/i2Nav-WHU/KF-GINS) and
 [INSLIB](https://github.com/jnz/INSLIB), run them on the same record. Each script fetches and
 builds its library at a pinned commit under `output/benchmark/` (git-ignored; needs git, cmake, a

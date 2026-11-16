@@ -3,6 +3,7 @@
 
 #include "common/reader/binary_record_reader.h"
 
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -120,10 +121,13 @@ TEST(BinaryRecordReader, ParsesAllRecordTypes) {
   AppendFloat(&gps, 13.5f);
   AppendFloat(&gps, 0.25f);
   gps.push_back(31);
+  Bytes long_gps = gps;
+  AppendFloat(&long_gps, 0.75f);
+  AppendFloat(&long_gps, 271.5f);
 
-  const std::optional<BinaryRecord> record = ReadBinaryRecord(
-      WriteTempFile(File({Record(0x01, 100, imu), Record(0x02, 100, speed),
-                          Record(0x02, 150, invalid_speed), Record(0x03, 200, gps)})));
+  const std::optional<BinaryRecord> record = ReadBinaryRecord(WriteTempFile(
+      File({Record(0x01, 100, imu), Record(0x02, 100, speed), Record(0x02, 150, invalid_speed),
+            Record(0x03, 200, gps), Record(0x05, 300, long_gps)})));
   ASSERT_TRUE(record.has_value());
   EXPECT_EQ(record->crc_errors, 0);
   EXPECT_EQ(record->skipped_bytes, 0);
@@ -138,7 +142,7 @@ TEST(BinaryRecordReader, ParsesAllRecordTypes) {
   ASSERT_EQ(record->wheel_speed.size(), 1u);
   EXPECT_DOUBLE_EQ(record->wheel_speed[0].speed_mps, 5.0);
 
-  ASSERT_EQ(record->gps.size(), 1u);
+  ASSERT_EQ(record->gps.size(), 2u);
   EXPECT_EQ(record->gps[0].timestamp_ns, 200000);
   EXPECT_EQ(record->gps[0].fix_age_ms, 120);
   EXPECT_DOUBLE_EQ(record->gps[0].latitude_deg, 22.7878390123);
@@ -146,6 +150,13 @@ TEST(BinaryRecordReader, ParsesAllRecordTypes) {
   EXPECT_DOUBLE_EQ(record->gps[0].altitude_m, 13.5);
   EXPECT_DOUBLE_EQ(record->gps[0].ground_speed_mps, 0.25);
   EXPECT_EQ(record->gps[0].satellite_count, 31);
+  EXPECT_TRUE(std::isnan(record->gps[0].hdop));
+  EXPECT_TRUE(std::isnan(record->gps[0].course_deg));
+  EXPECT_EQ(record->gps[1].timestamp_ns, 300000);
+  EXPECT_DOUBLE_EQ(record->gps[1].latitude_deg, 22.7878390123);
+  EXPECT_EQ(record->gps[1].satellite_count, 31);
+  EXPECT_DOUBLE_EQ(record->gps[1].hdop, 0.75);
+  EXPECT_DOUBLE_EQ(record->gps[1].course_deg, 271.5);
 }
 
 TEST(BinaryRecordReader, ResyncsAfterCorruption) {

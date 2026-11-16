@@ -20,7 +20,13 @@ constexpr uint8_t kSync1 = 0x5A;
 constexpr size_t kPayloadOffset = 11;
 constexpr size_t kCrcSize = 2;
 
-enum RecordType : uint8_t { kImu = 0x01, kSpeed = 0x02, kGps = 0x03, kLongImu = 0x04 };
+enum RecordType : uint8_t {
+  kImu = 0x01,
+  kSpeed = 0x02,
+  kGps = 0x03,
+  kLongImu = 0x04,
+  kLongGps = 0x05
+};
 
 constexpr int64_t kNanosecondsPerMicrosecond = 1000;
 constexpr int32_t kInvalidWheelSpeedKmh = 255;
@@ -37,6 +43,8 @@ size_t RecordSize(uint8_t type) {
       return 42;
     case kLongImu:
       return 57;
+    case kLongGps:
+      return 50;
     default:
       return 0;
   }
@@ -111,7 +119,8 @@ void Decode(const uint8_t* record, BinaryRecord* out) {
       }
       break;
     }
-    case kGps: {
+    case kGps:
+    case kLongGps: {
       sensor::GpsData gps{timestamp_ns, 0, 0.0, 0.0, 0.0, 0.0, 0};
       gps.fix_age_ms = static_cast<int64_t>(LittleEndian(payload, 4));
       gps.latitude_deg = Float64(payload + 4);
@@ -119,6 +128,10 @@ void Decode(const uint8_t* record, BinaryRecord* out) {
       gps.altitude_m = Float32(payload + 20);
       gps.ground_speed_mps = Float32(payload + 24);
       gps.satellite_count = payload[28];
+      if (type == kLongGps) {
+        gps.hdop = Float32(payload + 29);
+        gps.course_deg = Float32(payload + 33);
+      }
       out->gps.push_back(gps);
       break;
     }
