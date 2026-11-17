@@ -17,16 +17,21 @@ cc_library(
 
 cc_library(
     name = "gps_data",
-    srcs = ["gps_data.cc"],
     hdrs = ["gps_data.h"],
-    deps = ["@eigen"],
+)
+
+# C11
+cc_library(
+    name = "gps_accuracy",
+    srcs = ["gps_accuracy.c"],
+    hdrs = ["gps_accuracy.h"],
 )
 
 cc_test(
-    name = "gps_data_test",
-    srcs = ["gps_data_test.cc"],
+    name = "gps_accuracy_test",
+    srcs = ["gps_accuracy_test.cc"],
     deps = [
-        ":gps_data",
+        ":gps_accuracy",
         "@googletest//:gtest_main",
     ],
 )

@@ -20,6 +20,7 @@ cc_library(
     deps = [
         "//common/math:geodesy",
         "//common/reader:benchmark_dataset_reader",
+        "//common/sensor:gps_accuracy",
         "//common/sensor:gps_data",
         "@eigen",
     ],
@@ -31,7 +32,9 @@ cc_test(
     deps = [
         ":gps_noise",
         "//common/math:geodesy",
+        "//common/sensor:gps_accuracy",
         "//common/sensor:gps_data",
+        "@eigen",
         "@googletest//:gtest_main",
     ],
 )

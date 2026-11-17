@@ -10,7 +10,7 @@
 // easting, northing and altitude offsets from kOrigin) with white noise, a drift that builds up in
 // degraded stretches and decays in clear ones, and a satellite count that follows the drift.
 // Trailing "# gps t_s x y z satellites" comments carry the noisy fixes in the world frame.
-// The dataset's forward.txt (walking direction in the IMU frame) sets InsFusionOptions::forward,
+// The dataset's forward.txt (walking direction in the IMU frame) sets InsFusionOptions.forward,
 // so the initial yaw comes from the course of the first two GPS fixes.
 //
 // Usage: run_dataset_main [--seed N] [--gps_noise_scale S] <dataset> <out.tum>
@@ -23,6 +23,7 @@
 #include <vector>
 
 #include <gflags/gflags.h>
+#include <Eigen/Core>
 
 #include "common/math/geodesy.h"
 #include "common/reader/benchmark_dataset_reader.h"
@@ -47,8 +48,9 @@ int Run(const std::string& dataset_path, const std::string& output_path) {
     std::cerr << "cannot read imu.txt and gps.txt in " << dataset_path << "\n";
     return 1;
   }
-  const int zone = math::UtmZone(kOrigin.y());
-  const Eigen::Vector3d origin_utm = math::GeodeticToUtm(kOrigin, zone);
+  const int zone = utm_zone(kOrigin.y());
+  Eigen::Vector3d origin_utm;
+  geodetic_to_utm(kOrigin.data(), zone, origin_utm.data());
   simulation::GpsNoiseOptions noise;
   noise.horizontal_walk *= FLAGS_gps_noise_scale;
   noise.vertical_walk *= FLAGS_gps_noise_scale;
@@ -67,39 +69,46 @@ int Run(const std::string& dataset_path, const std::string& output_path) {
          << " world frame, t_s x_m y_m z_m qx qy qz qw (world_from_imu)\n";
 
   // a fix is applied before the IMU sample it precedes
-  InsFusionOptions options;
+  InsFusionOptions options = ins_fusion_default_options();
   options.constrain_vertical_velocity = FLAGS_constrain_vertical_velocity;
-  options.forward = dataset->forward;
-  InsFusion fusion(options);
+  Eigen::Map<Eigen::Vector3d>(options.forward) = dataset->forward;
+  InsFusion fusion;
+  ins_fusion_init(&fusion, &options);
   size_t gps_index = 0;
   int pose_count = 0;
   double initialized_s = 0.0;
   for (const sensor::ImuData& imu : dataset->imu) {
     for (; gps_index < gps.size() && gps[gps_index].timestamp_ns < imu.timestamp_ns; ++gps_index) {
-      fusion.AddGps(gps[gps_index]);
+      const sensor::GpsData& fix = gps[gps_index];
+      const InsFusionGps fusion_fix = {fix.timestamp_ns, fix.latitude_deg, fix.longitude_deg,
+                                       fix.altitude_m, fix.satellite_count};
+      ins_fusion_add_gps(&fusion, &fusion_fix, nullptr);
     }
-    fusion.AddImu(imu);
-    if (!fusion.initialized()) {
+    ins_fusion_add_imu(&fusion, imu.timestamp_ns, imu.linear_acceleration.data(),
+                       imu.angular_velocity.data());
+    if (!fusion.initialized) {
       continue;
     }
     if (pose_count == 0) {
       initialized_s =
           1e-9 * static_cast<double>(imu.timestamp_ns - dataset->imu.front().timestamp_ns);
     }
-    const Sophus::SE3d pose = fusion.pose();
-    const Eigen::Vector3d position = pose.translation() - origin_utm;
-    const Eigen::Quaterniond& rotation = pose.unit_quaternion();
+    Eigen::Vector3d position;
+    double rotation[4];  // w x y z
+    ins_fusion_pose(&fusion, position.data(), rotation);
+    position -= origin_utm;
     output << std::setprecision(6) << 1e-9 * static_cast<double>(imu.timestamp_ns)
            << std::setprecision(4) << " " << position.x() << " " << position.y() << " "
-           << position.z() << std::setprecision(7) << " " << rotation.x() << " " << rotation.y()
-           << " " << rotation.z() << " " << rotation.w() << "\n";
+           << position.z() << std::setprecision(7) << " " << rotation[1] << " " << rotation[2]
+           << " " << rotation[3] << " " << rotation[0] << "\n";
     ++pose_count;
   }
   // the GPS lines also when never initialized: other methods are run on them
   for (const sensor::GpsData& fix : gps) {
-    const Eigen::Vector3d position =
-        math::GeodeticToUtm({fix.latitude_deg, fix.longitude_deg, fix.altitude_m}, zone) -
-        origin_utm;
+    const double geodetic[3] = {fix.latitude_deg, fix.longitude_deg, fix.altitude_m};
+    Eigen::Vector3d position;
+    geodetic_to_utm(geodetic, zone, position.data());
+    position -= origin_utm;
     output << "# gps " << std::setprecision(6) << 1e-9 * static_cast<double>(fix.timestamp_ns)
            << std::setprecision(4) << " " << position.x() << " " << position.y() << " "
            << position.z() << " " << fix.satellite_count << "\n";
@@ -110,8 +119,11 @@ int Run(const std::string& dataset_path, const std::string& output_path) {
   }
   std::cout << "wrote " << pose_count << " poses to " << output_path << ", initialized after "
             << std::setprecision(1) << initialized_s << " s\n"
-            << "final bias: gyroscope " << fusion.gyroscope_bias().transpose() << ", accelerometer "
-            << fusion.accelerometer_bias().transpose() << "\n";
+            << "final bias: gyroscope "
+            << Eigen::Map<const Eigen::Vector3d>(fusion.filter.gyroscope_bias).transpose()
+            << ", accelerometer "
+            << Eigen::Map<const Eigen::Vector3d>(fusion.filter.accelerometer_bias).transpose()
+            << "\n";
   return 0;
 }
 

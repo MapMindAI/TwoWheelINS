@@ -40,11 +40,12 @@ cc_library(
     deps = [":covariance"],
 )
 
+# C11
 cc_library(
     name = "geodesy",
-    srcs = ["geodesy.cc"],
+    srcs = ["geodesy.c"],
     hdrs = ["geodesy.h"],
-    deps = ["@eigen"],
+    linkopts = ["-lm"],
 )
 
 cc_test(
@@ -52,6 +53,26 @@ cc_test(
     srcs = ["geodesy_test.cc"],
     deps = [
         ":geodesy",
+        "@eigen",
         "@googletest//:gtest_main",
+    ],
+)
+
+# C11
+cc_library(
+    name = "quaternion",
+    srcs = ["quaternion.c"],
+    hdrs = ["quaternion.h"],
+    linkopts = ["-lm"],
+)
+
+cc_test(
+    name = "quaternion_test",
+    srcs = ["quaternion_test.cc"],
+    deps = [
+        ":quaternion",
+        "@eigen",
+        "@googletest//:gtest_main",
+        "@sophus",
     ],
 )

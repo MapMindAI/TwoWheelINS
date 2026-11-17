@@ -7,8 +7,6 @@
 #include <cstdint>
 #include <limits>
 
-#include <Eigen/Core>
-
 namespace mapmind::sensor {
 
 struct GpsData {
@@ -26,10 +24,6 @@ struct GpsData {
   double hdop = std::numeric_limits<double>::quiet_NaN();
   double course_deg = std::numeric_limits<double>::quiet_NaN();
 };
-
-// GPS position covariance (UTM easting, northing, altitude; m^2) for a fix from
-// `satellite_count` satellites: > 20 is a fix solution, 11-20 float, fewer single.
-Eigen::Matrix3d GpsCovariance(int satellite_count);
 
 }  // namespace mapmind::sensor
 

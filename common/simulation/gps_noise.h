@@ -33,7 +33,7 @@ struct GpsNoiseOptions {
 
 // Returns `gps` with the noise of `options` added, as WGS84 fixes: world x, y, z are UTM easting,
 // northing and altitude offsets from `origin` (latitude_deg, longitude_deg, altitude_m; northern
-// hemisphere). Each fix gets the highest satellite count whose sensor::GpsCovariance horizontal std
+// hemisphere). Each fix gets the highest satellite count whose gps_position_std horizontal std
 // covers the horizontal drift. The same `seed` gives the same noise.
 std::vector<sensor::GpsData> AddGpsNoise(const std::vector<reader::GpsPosition>& gps,
                                          const Eigen::Vector3d& origin,

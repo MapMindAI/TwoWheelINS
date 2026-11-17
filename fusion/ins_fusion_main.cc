@@ -10,6 +10,7 @@
 // Usage: ins_fusion_main [--constrain_vertical_velocity] [--forward=x,y,z] <record> <output.tum>
 
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -20,6 +21,7 @@
 #include <vector>
 
 #include <gflags/gflags.h>
+#include <Eigen/Core>
 
 #include "common/math/geodesy.h"
 #include "common/reader/binary_record_reader.h"
@@ -91,15 +93,16 @@ int Run(const std::string& record_path, const std::string& output_path) {
   output << std::fixed;
 
   // Merge the streams by timestamp; a measurement is applied before the IMU sample it precedes.
-  InsFusionOptions options;
+  InsFusionOptions options = ins_fusion_default_options();
   options.constrain_vertical_velocity = FLAGS_constrain_vertical_velocity;
   const std::optional<Eigen::Vector3d> forward = ParseVector(FLAGS_forward);
   if (!forward) {
     std::cerr << "bad --forward " << FLAGS_forward << "\n";
     return 1;
   }
-  options.forward = *forward;
-  InsFusion fusion(options);
+  Eigen::Map<Eigen::Vector3d>(options.forward) = *forward;
+  InsFusion fusion;
+  ins_fusion_init(&fusion, &options);
   const std::vector<sensor::GpsData>& gps = record->gps;
   const std::vector<sensor::WheelSpeedData>& wheel_speed = record->wheel_speed;
   size_t gps_index = 0;
@@ -108,33 +111,40 @@ int Run(const std::string& record_path, const std::string& output_path) {
   int pose_count = 0;
   for (const sensor::ImuData& imu : record->imu) {
     for (; gps_index < gps.size() && gps[gps_index].timestamp_ns < imu.timestamp_ns; ++gps_index) {
-      if (const std::optional<Eigen::Vector3d> innovation = fusion.AddGps(gps[gps_index])) {
-        gps_horizontal_innovation.push_back(innovation->head<2>().norm());
+      const sensor::GpsData& fix = gps[gps_index];
+      const InsFusionGps fusion_fix = {fix.timestamp_ns, fix.latitude_deg, fix.longitude_deg,
+                                       fix.altitude_m, fix.satellite_count};
+      double innovation[3];
+      if (ins_fusion_add_gps(&fusion, &fusion_fix, innovation)) {
+        gps_horizontal_innovation.push_back(std::hypot(innovation[0], innovation[1]));
       }
     }
     for (; wheel_index < wheel_speed.size() &&
            wheel_speed[wheel_index].timestamp_ns < imu.timestamp_ns;
          ++wheel_index) {
-      fusion.AddWheelSpeed(wheel_speed[wheel_index]);
+      ins_fusion_add_wheel_speed(&fusion, wheel_speed[wheel_index].timestamp_ns,
+                                 wheel_speed[wheel_index].speed_mps);
     }
-    fusion.AddImu(imu);
-    if (!fusion.initialized()) {
+    ins_fusion_add_imu(&fusion, imu.timestamp_ns, imu.linear_acceleration.data(),
+                       imu.angular_velocity.data());
+    if (!fusion.initialized) {
       continue;
     }
     if (pose_count == 0) {
-      output << "# UTM zone " << *fusion.utm_zone() << (gps.front().latitude_deg < 0 ? "S" : "N")
+      output << "# UTM zone " << fusion.utm_zone << (gps.front().latitude_deg < 0 ? "S" : "N")
              << " (WGS84), t_s easting_m northing_m altitude_m qx qy qz qw\n";
     }
-    const Sophus::SE3d pose = fusion.pose();
-    const Eigen::Quaterniond& rotation = pose.unit_quaternion();
+    double position[3];
+    double rotation[4];  // w x y z
+    ins_fusion_pose(&fusion, position, rotation);
     output << std::setprecision(6) << 1e-9 * static_cast<double>(imu.timestamp_ns)
-           << std::setprecision(4) << " " << pose.translation().x() << " " << pose.translation().y()
-           << " " << pose.translation().z() << std::setprecision(7) << " " << rotation.x() << " "
-           << rotation.y() << " " << rotation.z() << " " << rotation.w() << "\n";
+           << std::setprecision(4) << " " << position[0] << " " << position[1] << " " << position[2]
+           << std::setprecision(7) << " " << rotation[1] << " " << rotation[2] << " " << rotation[3]
+           << " " << rotation[0] << "\n";
     ++pose_count;
   }
 
-  if (!fusion.initialized()) {
+  if (!fusion.initialized) {
     std::cerr << (gps.empty() ? "record has no GPS fixes\n"
                               : "vehicle never moves fast enough to initialize heading\n");
     return 1;
@@ -143,20 +153,24 @@ int Run(const std::string& record_path, const std::string& output_path) {
     if (fix.latitude_deg == 0.0 && fix.longitude_deg == 0.0) {
       continue;
     }
-    const Eigen::Vector3d utm = math::GeodeticToUtm(
-        Eigen::Vector3d(fix.latitude_deg, fix.longitude_deg, fix.altitude_m), *fusion.utm_zone());
+    const double geodetic[3] = {fix.latitude_deg, fix.longitude_deg, fix.altitude_m};
+    Eigen::Vector3d utm;
+    geodetic_to_utm(geodetic, fusion.utm_zone, utm.data());
     output << "# gps " << std::setprecision(6) << 1e-9 * static_cast<double>(fix.timestamp_ns)
            << std::setprecision(4) << " " << utm.x() << " " << utm.y() << " " << utm.z() << " "
            << fix.satellite_count << "\n";
   }
   std::cout << "wrote " << pose_count << " poses to " << output_path << " (UTM zone "
-            << *fusion.utm_zone() << ")\n"
+            << fusion.utm_zone << ")\n"
             << "gps horizontal innovation (m) over " << gps_horizontal_innovation.size()
             << " fixes: median " << Percentile(gps_horizontal_innovation, 0.5) << ", p95 "
             << Percentile(gps_horizontal_innovation, 0.95) << ", max "
             << Percentile(gps_horizontal_innovation, 1.0) << "\n"
-            << "final bias: gyroscope " << fusion.gyroscope_bias().transpose() << ", accelerometer "
-            << fusion.accelerometer_bias().transpose() << "\n";
+            << "final bias: gyroscope "
+            << Eigen::Map<const Eigen::Vector3d>(fusion.filter.gyroscope_bias).transpose()
+            << ", accelerometer "
+            << Eigen::Map<const Eigen::Vector3d>(fusion.filter.accelerometer_bias).transpose()
+            << "\n";
   return 0;
 }
 

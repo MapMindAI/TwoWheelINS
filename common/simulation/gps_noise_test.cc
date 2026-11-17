@@ -7,6 +7,7 @@
 
 #include <gtest/gtest.h>
 #include "common/math/geodesy.h"
+#include "common/sensor/gps_accuracy.h"
 #include "common/sensor/gps_data.h"
 
 namespace mapmind::simulation {
@@ -16,13 +17,15 @@ const Eigen::Vector3d kOrigin(22.787839, 113.5210145, 13.0);
 
 // m, world-frame (UTM offset from kOrigin) error of the fixes of a static receiver at the origin
 std::vector<Eigen::Vector3d> Errors(const std::vector<sensor::GpsData>& gps) {
-  const int zone = math::UtmZone(kOrigin.y());
-  const Eigen::Vector3d origin_utm = math::GeodeticToUtm(kOrigin, zone);
+  const int zone = utm_zone(kOrigin.y());
+  Eigen::Vector3d origin_utm;
+  geodetic_to_utm(kOrigin.data(), zone, origin_utm.data());
   std::vector<Eigen::Vector3d> errors;
   for (const sensor::GpsData& fix : gps) {
-    errors.push_back(
-        math::GeodeticToUtm({fix.latitude_deg, fix.longitude_deg, fix.altitude_m}, zone) -
-        origin_utm);
+    const double geodetic[3] = {fix.latitude_deg, fix.longitude_deg, fix.altitude_m};
+    Eigen::Vector3d utm;
+    geodetic_to_utm(geodetic, zone, utm.data());
+    errors.push_back(utm - origin_utm);
   }
   return errors;
 }
@@ -85,12 +88,12 @@ TEST(GpsNoise, SatelliteCountFollowsError) {
   for (size_t i = 0; i < noisy.size(); ++i) {
     fix_count += noisy[i].satellite_count >= 21;
     single_count += noisy[i].satellite_count <= 10;
-    const double horizontal_std = std::sqrt(sensor::GpsCovariance(noisy[i].satellite_count)(0, 0));
+    const double horizontal_std = gps_position_std(noisy[i].satellite_count).horizontal;
     outside_count += errors[i].head<2>().norm() > 3.0 * horizontal_std;
   }
   EXPECT_GT(fix_count, noisy.size() / 5);
   EXPECT_GT(single_count, noisy.size() / 20);
-  // the covariance of the reported count covers the error
+  // the std of the reported count covers the error
   EXPECT_LT(outside_count, noisy.size() / 50);
 }
 

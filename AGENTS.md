@@ -8,15 +8,16 @@ pose estimate. See `README.md` for the directory tree and build commands, and th
 
 | Path | Contents |
 |---|---|
-| `common/` | Shared C++ helpers: `math/` (so3/se3 Jacobians, covariance, UTM projection), `sensor/` (IMU with optional magnetometer, barometer, GPS, wheel-speed data), `reader/` (binary and text record readers, benchmark dataset reader), `simulation/` (simulated IMU data with ground truth, drifting GPS noise with a satellite count) |
-| `fusion/` | `KfcoreIns` (15-state error-state INS on the KFCore UDU filter), `InsFusion` (IMU + GPS on `KfcoreIns`; wheel speed detects standstill), `ins_fusion_main` (runs it on a record, writes TUM poses in UTM), `run_dataset_main` (runs it on a benchmark dataset with simulated drifting GPS noise, writes TUM in the dataset frame) |
+| `common/` | Shared helpers: `math/` (so3/se3 Jacobians, covariance; C11 UTM projection and quaternions), `sensor/` (IMU with optional magnetometer, barometer, GPS, wheel-speed data; C11 GPS accuracy by satellite count), `reader/` (binary and text record readers, benchmark dataset reader), `simulation/` (simulated IMU data with ground truth, drifting GPS noise with a satellite count) |
+| `fusion/` | `kfcore_ins` (C11 15-state error-state INS on the KFCore UDU filter, no Eigen or heap), `ins_fusion` (C11 IMU + GPS INS on `kfcore_ins`; wheel speed detects standstill; a C project needs only it, `kfcore_ins`, `common/math` geodesy and quaternion, `common/sensor` GPS accuracy and `third_party/kfcore`), `ins_fusion_main` (runs it on a record, writes TUM poses in UTM), `run_dataset_main` (runs it on a benchmark dataset with simulated drifting GPS noise, writes TUM in the dataset frame) |
 | `tools/` | `trajectory_viewer.html` (TUM viewer: 3D via WebGL over satellite imagery, 2D map via Leaflet), `trajectory_error.py` (TUM estimate vs. ground truth), `benchmark_report.py` (HTML report comparing methods on the benchmark datasets), `barometer_height.py` (height from pressure in a binary record, with GPS altitude) |
 | `doc/` | Design notes (`initialization.md`: how `InsFusion` levels and starts from two GPS fixes; `binary_record_format.md`: binary record layout) |
 | `third_party/kfcore/` | KFCore UDU Kalman filter (C, unmodified; BSD-3-Clause + attribution clause) |
+| `CMakeLists.txt` | Builds the C11 `ins_fusion` library alone: an ESP-IDF component (`idf_component_register`) under `ESP_PLATFORM`, else a plain static library; Bazel builds everything else |
 | `MODULE.bazel` | All external deps (Bazel Central Registry); commit `MODULE.bazel.lock` with it |
 | `benchmark/` | `run_kfgins.sh` / `run_inslib.sh`: fetch, build and run KF-GINS (GPL-3.0) / INSLIB (AGPL-3.0) on a record under `output/benchmark/`; `ins_benchmark.py` converts the record and writes TUM; `run_datasets.sh` runs `run_dataset_main` and then INSLIB (`run_inslib_datasets.sh`, `inslib_dataset.py`) on every dataset with the same noisy GPS, prints their errors and writes an HTML report comparing them; `make_datasets.py` builds `benchmark/datasets/` (100 Hz IMU, 1 Hz GPS, ground truth) and map images from looper rosbags (CoreMap ground truth) and unilidar sessions (lidar SLAM ground truth); `benchmark/datasets/barometer_*/record.bin`: binary barometer records over known floors, no ground truth |
 | `toolchain/` | aarch64 platform + cross-compile toolchain (`--config=aarch64`) |
-| `.github/workflows/ci.yml` | CI: `bazel test //...` |
+| `.github/workflows/ci.yml` | CI: `bazel test //...`, CMake build of `ins_fusion` |
 | `data/` | Local sensor captures — git-ignored, never commit |
 
 ## 1. Language and portability
@@ -41,6 +42,7 @@ pose estimate. See `README.md` for the directory tree and build commands, and th
 
 * `bazel test //...` must pass (CI runs it on every PR).
 * `bazel build --config=aarch64 //...` must pass when you touch C code, `toolchain/`, or deps.
+* Adding or removing a C source of `ins_fusion` or its deps: update `CMakeLists.txt` too.
 * Format with `.clang-format` (Google style, 100 col); code should pass `.clang-tidy` and `CPPLINT.cfg`.
 * A new test must fail when the behavior it guards is broken — check it once by breaking the code.
 
