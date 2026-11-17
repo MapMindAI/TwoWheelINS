@@ -4,13 +4,9 @@ package(default_visibility = ["//visibility:public"])
 
 cc_library(
     name = "kfcore_ins",
-    srcs = ["kfcore_ins.cc"],
+    srcs = ["kfcore_ins.c"],
     hdrs = ["kfcore_ins.h"],
-    deps = [
-        "//third_party/kfcore",
-        "@eigen",
-        "@sophus",
-    ],
+    deps = ["//third_party/kfcore"],
 )
 
 cc_test(
@@ -18,7 +14,9 @@ cc_test(
     srcs = ["kfcore_ins_test.cc"],
     deps = [
         ":kfcore_ins",
+        "@eigen",
         "@googletest//:gtest_main",
+        "@sophus",
     ],
 )
 
@@ -32,6 +30,7 @@ cc_library(
         "//common/sensor:gps_data",
         "//common/sensor:imu_data",
         "//common/sensor:wheel_speed_data",
+        "@eigen",
         "@sophus",
     ],
 )

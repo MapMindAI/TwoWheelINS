@@ -20,13 +20,13 @@ constexpr int kMinSatellites = 4;
 
 // Accelerometer and gyroscope densities are the vibration measured on mobili_2; the position,
 // velocity and attitude random walks are INSLIB's defaults.
-constexpr KfcoreIns::ProcessNoise kProcessNoise = {/*accelerometer=*/0.2,
-                                                   /*gyroscope=*/0.01,
-                                                   /*accelerometer_bias=*/2e-3,
-                                                   /*gyroscope_bias=*/2e-4,
-                                                   /*position=*/0.01,
-                                                   /*velocity=*/5e-4,
-                                                   /*attitude=*/1e-3};
+constexpr KfcoreInsProcessNoise kProcessNoise = {/*accelerometer=*/0.2,
+                                                 /*gyroscope=*/0.01,
+                                                 /*accelerometer_bias=*/2e-3,
+                                                 /*gyroscope_bias=*/2e-4,
+                                                 /*position=*/0.01,
+                                                 /*velocity=*/5e-4,
+                                                 /*attitude=*/1e-3};
 // A fix this much newer than the last IMU sample (inside an IMU gap) is applied after predicting
 // to its time with that sample; closer ones are applied at the last sample.
 constexpr double kMaxMeasurementLeadSeconds = 0.2;
@@ -50,27 +50,37 @@ constexpr double kVerticalVelocityStd = 0.3;  // m/s, level-road prior while mov
 constexpr double kVerticalGate = 10.83;
 constexpr int kMaxDroppedAltitudes = 5;
 
-using StateIndex = KfcoreIns::StateIndex;
-
 double Seconds(int64_t duration_ns) { return 1e-9 * static_cast<double>(duration_ns); }
 
 Eigen::Vector3d Geodetic(const sensor::GpsData& gps) {
   return {gps.latitude_deg, gps.longitude_deg, gps.altitude_m};
 }
 
-// Error-state Jacobian selecting kRows states from `index`.
+Eigen::Map<const Eigen::Vector3d> Vector(const double (&vector)[3]) {
+  return Eigen::Map<const Eigen::Vector3d>(vector);
+}
+
+// body to world
+Sophus::SO3d Rotation(const KfcoreIns& filter) {
+  const double* q = filter.rotation;
+  return Sophus::SO3d(Eigen::Quaterniond(q[0], q[1], q[2], q[3]));
+}
+
+// Fuses `residual` = error of the kRows states from `index` + noise of `variance`.
 template <int kRows>
-Eigen::Matrix<double, kRows, KfcoreIns::kStateSize> Selection(int index) {
-  Eigen::Matrix<double, kRows, KfcoreIns::kStateSize> jacobian;
+void UpdateStates(KfcoreIns* filter, int index, const Eigen::Matrix<double, kRows, 1>& residual,
+                  const Eigen::Matrix<double, kRows, 1>& variance) {
+  Eigen::Matrix<double, kRows, KFCORE_INS_STATE_SIZE, Eigen::RowMajor> jacobian;
   jacobian.setZero();
   jacobian.template block<kRows, kRows>(0, index).setIdentity();
-  return jacobian;
+  kfcore_ins_update(filter, residual.data(), jacobian.data(), variance.data(), kRows);
 }
 
 }  // namespace
 
-InsFusion::InsFusion(const InsFusionOptions& options)
-    : options_(options), filter_(kProcessNoise, kGravity, kCovariancePeriodSeconds) {}
+InsFusion::InsFusion(const InsFusionOptions& options) : options_(options) {
+  kfcore_ins_init(&filter_, &kProcessNoise, kGravity, kCovariancePeriodSeconds);
+}
 
 void InsFusion::AddImu(const sensor::ImuData& imu) {
   if (static_sample_count_ == 0) {
@@ -89,7 +99,7 @@ void InsFusion::AddImu(const sensor::ImuData& imu) {
   }
 
   if (initialized_) {
-    filter_.Predict(imu.linear_acceleration, imu.angular_velocity, dt);
+    kfcore_ins_predict(&filter_, imu.linear_acceleration.data(), imu.angular_velocity.data(), dt);
     ConstrainVelocity(imu.timestamp_ns);
   } else if (attitude_) {
     integrated_forward_ += dt * (*attitude_ * options_.forward);
@@ -139,19 +149,19 @@ std::optional<Eigen::Vector3d> InsFusion::AddGps(const sensor::GpsData& gps) {
 
 Eigen::Vector3d InsFusion::UpdateGpsPosition(const Eigen::Vector3d& position,
                                              const Eigen::Matrix3d& gps_covariance) {
-  const Eigen::Vector3d innovation = position - filter_.position();
+  const Eigen::Vector3d innovation = position - Vector(filter_.position);
   const Eigen::Vector3d variance = gps_covariance.diagonal();
-  const int altitude_index = StateIndex::kPosition + 2;
-  const double altitude_variance =
-      filter_.covariance()(altitude_index, altitude_index) + variance.z();
+  Eigen::Matrix<double, KFCORE_INS_STATE_SIZE, KFCORE_INS_STATE_SIZE> covariance;
+  kfcore_ins_covariance(&filter_, covariance.data());
+  const int altitude_index = KFCORE_INS_POSITION + 2;
+  const double altitude_variance = covariance(altitude_index, altitude_index) + variance.z();
   if (innovation.z() * innovation.z() > kVerticalGate * altitude_variance &&
       dropped_altitude_count_ < kMaxDroppedAltitudes) {
     ++dropped_altitude_count_;
-    filter_.Update<2>(innovation.head<2>(), Selection<2>(StateIndex::kPosition),
-                      variance.head<2>());
+    UpdateStates<2>(&filter_, KFCORE_INS_POSITION, innovation.head<2>(), variance.head<2>());
   } else {
     dropped_altitude_count_ = 0;
-    filter_.Update<3>(innovation, Selection<3>(StateIndex::kPosition), variance);
+    UpdateStates<3>(&filter_, KFCORE_INS_POSITION, innovation, variance);
   }
   return innovation;
 }
@@ -164,16 +174,16 @@ bool InsFusion::IsStationary(int64_t timestamp_ns) const {
 
 void InsFusion::ConstrainVelocity(int64_t timestamp_ns) {
   if (IsStationary(timestamp_ns)) {
-    filter_.Update<3>(-filter_.velocity(), Selection<3>(StateIndex::kVelocity),
-                      Eigen::Vector3d::Constant(kZeroVelocityStd * kZeroVelocityStd));
+    UpdateStates<3>(&filter_, KFCORE_INS_VELOCITY, -Vector(filter_.velocity),
+                    Eigen::Vector3d::Constant(kZeroVelocityStd * kZeroVelocityStd));
     return;
   }
   if (!options_.constrain_vertical_velocity) {
     return;
   }
-  filter_.Update<1>(Eigen::Matrix<double, 1, 1>(-filter_.velocity().z()),
-                    Selection<1>(StateIndex::kVelocity + 2),
-                    Eigen::Matrix<double, 1, 1>(kVerticalVelocityStd * kVerticalVelocityStd));
+  UpdateStates<1>(&filter_, KFCORE_INS_VELOCITY + 2,
+                  Eigen::Matrix<double, 1, 1>(-filter_.velocity[2]),
+                  Eigen::Matrix<double, 1, 1>(kVerticalVelocityStd * kVerticalVelocityStd));
 }
 
 void InsFusion::Start(const sensor::GpsData& gps) {
@@ -196,13 +206,16 @@ void InsFusion::Start(const sensor::GpsData& gps) {
   const double velocity_std = std::max(step_std / dt, kInitialVelocityStd);
   const double yaw_std = std::clamp(step_std / step.head<2>().norm(), kMinInitialYawStd, M_PI);
 
-  KfcoreIns::StateVector initial_std;
+  Eigen::Matrix<double, KFCORE_INS_STATE_SIZE, 1> initial_std;
   initial_std << gps_covariance.diagonal().cwiseSqrt(), Eigen::Vector3d::Constant(velocity_std),
       Eigen::Vector3d(kInitialRollPitchStd, kInitialRollPitchStd, yaw_std),
       Eigen::Vector3d::Constant(kInitialAccelerometerBiasStd),
       Eigen::Vector3d::Constant(kInitialGyroscopeBiasStd);
-  filter_.Reset(position, Sophus::SO3d::rotZ(yaw) * *attitude_,
-                Eigen::Vector3d(step.x() / dt, step.y() / dt, 0.0), gyroscope_bias_, initial_std);
+  const Eigen::Quaterniond rotation = (Sophus::SO3d::rotZ(yaw) * *attitude_).unit_quaternion();
+  const double rotation_wxyz[4] = {rotation.w(), rotation.x(), rotation.y(), rotation.z()};
+  const Eigen::Vector3d velocity(step.x() / dt, step.y() / dt, 0.0);
+  kfcore_ins_reset(&filter_, position.data(), rotation_wxyz, velocity.data(),
+                   gyroscope_bias_.data(), initial_std.data());
   first_fix_.reset();
   initialized_ = true;
 }
@@ -215,7 +228,8 @@ void InsFusion::PredictToMeasurement(int64_t timestamp_ns) {
   if (!initialized_) {
     return;
   }
-  filter_.Predict(last_imu_->linear_acceleration, last_imu_->angular_velocity, dt);
+  kfcore_ins_predict(&filter_, last_imu_->linear_acceleration.data(),
+                     last_imu_->angular_velocity.data(), dt);
   last_imu_timestamp_ns_ = timestamp_ns;
 }
 
@@ -225,8 +239,8 @@ void InsFusion::Rearm() {
   if (!initialized_) {
     return;
   }
-  attitude_ = filter_.rotation();
-  gyroscope_bias_ = filter_.gyroscope_bias();
+  attitude_ = Rotation(filter_);
+  gyroscope_bias_ = Vector(filter_.gyroscope_bias);
   initialized_ = false;
 }
 
@@ -235,7 +249,7 @@ void InsFusion::AddWheelSpeed(const sensor::WheelSpeedData& wheel_speed) {
 }
 
 Sophus::SE3d InsFusion::pose() const {
-  return Sophus::SE3d(filter_.rotation(), origin_ + filter_.position());
+  return Sophus::SE3d(Rotation(filter_), origin_ + Vector(filter_.position));
 }
 
 }  // namespace mapmind::fusion

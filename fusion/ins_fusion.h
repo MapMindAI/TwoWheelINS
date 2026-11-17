@@ -57,8 +57,13 @@ class InsFusion {
   Sophus::SE3d pose() const;
   // UTM zone of the first usable GPS fix, used for all fixes.
   std::optional<int> utm_zone() const { return utm_zone_; }
-  const Eigen::Vector3d& gyroscope_bias() const { return filter_.gyroscope_bias(); }
-  const Eigen::Vector3d& accelerometer_bias() const { return filter_.accelerometer_bias(); }
+  // body, rad/s and m/s^2
+  Eigen::Vector3d gyroscope_bias() const {
+    return Eigen::Map<const Eigen::Vector3d>(filter_.gyroscope_bias);
+  }
+  Eigen::Vector3d accelerometer_bias() const {
+    return Eigen::Map<const Eigen::Vector3d>(filter_.accelerometer_bias);
+  }
 
  private:
   // the first of the two fixes the filter starts from

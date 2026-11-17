@@ -14,7 +14,7 @@ The previous iterated Kalman filter on manifolds (ikfom, GPL-2.0) is in release
 ## Layout
 
 ```
-├── fusion/           # KfcoreIns (error-state INS on KFCore), InsFusion (IMU + GPS, wheel speed for standstill), ins_fusion_main, run_dataset_main
+├── fusion/           # kfcore_ins (C11 error-state INS on KFCore), InsFusion (IMU + GPS, wheel speed for standstill), ins_fusion_main, run_dataset_main
 ├── tools/            # WebGL/Leaflet trajectory viewer for TUM output, trajectory error, benchmark HTML report, barometer height plot
 ├── third_party/      # vendored code: KFCore UDU Kalman filter (C)
 ├── benchmark/        # run KF-GINS / INSLIB on a record (fetched at run time); build datasets
