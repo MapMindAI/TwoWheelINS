@@ -4,6 +4,7 @@
 /external
 /compile_commands.json
 /.cache/
+/build/
 
 # Local datasets/captures (sensor recordings) and run outputs
 /data/

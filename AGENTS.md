@@ -13,10 +13,11 @@ pose estimate. See `README.md` for the directory tree and build commands, and th
 | `tools/` | `trajectory_viewer.html` (TUM viewer: 3D via WebGL over satellite imagery, 2D map via Leaflet), `trajectory_error.py` (TUM estimate vs. ground truth), `benchmark_report.py` (HTML report comparing methods on the benchmark datasets), `barometer_height.py` (height from pressure in a binary record, with GPS altitude) |
 | `doc/` | Design notes (`initialization.md`: how `InsFusion` levels and starts from two GPS fixes; `binary_record_format.md`: binary record layout) |
 | `third_party/kfcore/` | KFCore UDU Kalman filter (C, unmodified; BSD-3-Clause + attribution clause) |
+| `CMakeLists.txt` | Builds the C11 `ins_fusion` library alone: an ESP-IDF component (`idf_component_register`) under `ESP_PLATFORM`, else a plain static library; Bazel builds everything else |
 | `MODULE.bazel` | All external deps (Bazel Central Registry); commit `MODULE.bazel.lock` with it |
 | `benchmark/` | `run_kfgins.sh` / `run_inslib.sh`: fetch, build and run KF-GINS (GPL-3.0) / INSLIB (AGPL-3.0) on a record under `output/benchmark/`; `ins_benchmark.py` converts the record and writes TUM; `run_datasets.sh` runs `run_dataset_main` and then INSLIB (`run_inslib_datasets.sh`, `inslib_dataset.py`) on every dataset with the same noisy GPS, prints their errors and writes an HTML report comparing them; `make_datasets.py` builds `benchmark/datasets/` (100 Hz IMU, 1 Hz GPS, ground truth) and map images from looper rosbags (CoreMap ground truth) and unilidar sessions (lidar SLAM ground truth); `benchmark/datasets/barometer_*/record.bin`: binary barometer records over known floors, no ground truth |
 | `toolchain/` | aarch64 platform + cross-compile toolchain (`--config=aarch64`) |
-| `.github/workflows/ci.yml` | CI: `bazel test //...` |
+| `.github/workflows/ci.yml` | CI: `bazel test //...`, CMake build of `ins_fusion` |
 | `data/` | Local sensor captures — git-ignored, never commit |
 
 ## 1. Language and portability
@@ -41,6 +42,7 @@ pose estimate. See `README.md` for the directory tree and build commands, and th
 
 * `bazel test //...` must pass (CI runs it on every PR).
 * `bazel build --config=aarch64 //...` must pass when you touch C code, `toolchain/`, or deps.
+* Adding or removing a C source of `ins_fusion` or its deps: update `CMakeLists.txt` too.
 * Format with `.clang-format` (Google style, 100 col); code should pass `.clang-tidy` and `CPPLINT.cfg`.
 * A new test must fail when the behavior it guards is broken — check it once by breaking the code.
 

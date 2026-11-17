@@ -21,3 +21,6 @@ jobs:
 
       - name: Test
         run: bazel test //...
+
+      - name: CMake build of the C library
+        run: cmake -S . -B build -DCMAKE_C_FLAGS="-Wall -Wextra -Werror" && cmake --build build

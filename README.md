@@ -22,6 +22,7 @@ The previous iterated Kalman filter on manifolds (ikfom, GPL-2.0) is in release
 ├── common/           # shared helpers: so3/se3 Jacobians, covariance, C11 UTM projection and quaternions (math/), sensor data types and C11 GPS accuracy (sensor/), binary and text record and benchmark dataset readers (reader/), IMU simulation and GPS noise (simulation/)
 ├── toolchain/        # aarch64 platform + cross-compile cc_toolchain
 ├── .github/workflows # CI: bazel test //...
+├── CMakeLists.txt    # builds the C11 ins_fusion library: ESP-IDF component or plain CMake
 ├── MODULE.bazel      # external deps (Bazel Central Registry)
 └── data/             # local sensor captures (git-ignored)
 ```
@@ -37,6 +38,19 @@ as `bazel` and it fetches the pinned version; dependencies come from the Bazel C
 ```bash
 bazel test //...                       # host build + all tests
 bazel build --config=aarch64 //...     # cross-compile for arm64 (needs gcc-aarch64-linux-gnu)
+```
+
+The INS (`fusion/ins_fusion.h`) is C11 with no heap, and the root `CMakeLists.txt` builds it alone:
+
+- ESP-IDF: the repo is a component. Add it to `EXTRA_COMPONENT_DIRS` (or under `components/`) and
+  `REQUIRES` it by its directory name. The caller's task needs about 12 KB of stack
+  (`ins_fusion_add_imu` peaks there, 8.4 KB of it in KFCore's `kalman_udu_predict`), plus 1.5 KB for
+  an `InsFusion` on the stack.
+- Plain CMake: the static library `ins_fusion`, via `add_subdirectory(<this repo>)` and
+  `target_link_libraries(<target> ins_fusion)`, or on its own:
+
+```bash
+cmake -S . -B build && cmake --build build   # build/libins_fusion.a
 ```
 
 Run the fusion on a record, binary ([format](doc/binary_record_format.md)) or text; it writes the IMU pose (UTM easting, northing, altitude)
