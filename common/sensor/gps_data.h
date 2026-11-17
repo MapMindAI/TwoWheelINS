@@ -5,6 +5,7 @@
 #define COMMON_SENSOR_GPS_DATA_H_
 
 #include <cstdint>
+#include <limits>
 
 #include <Eigen/Core>
 
@@ -21,6 +22,9 @@ struct GpsData {
   int satellite_count;
   // age of the fix at timestamp_ns (binary records); 0 in text records
   int64_t fix_age_ms = 0;
+  // long GPS records only, else NaN; course is clockwise from true north
+  double hdop = std::numeric_limits<double>::quiet_NaN();
+  double course_deg = std::numeric_limits<double>::quiet_NaN();
 };
 
 // GPS position covariance (UTM easting, northing, altitude; m^2) for a fix from

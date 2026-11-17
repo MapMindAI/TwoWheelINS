@@ -25,9 +25,10 @@ Every record is: sync bytes `A5 5A`, a 1-byte type, a signed 64-bit boot timesta
 | `02` Speed | wheel speed (km/h): int32, `255` = unavailable | 17 bytes |
 | `03` GPS | fix age (ms): uint32; latitude, longitude (deg): binary64; altitude (m), speed (m/s): binary32; satellite count: uint8 | 42 bytes |
 | `04` Long IMU | the six `01` values, then `mx`, `my`, `mz` (milligauss), temperature (°C), pressure (Pa): eleven binary32 | 57 bytes |
+| `05` Long GPS | the `03` values, then HDOP and course (deg clockwise from true north, NaN if unknown): two binary32 | 50 bytes |
 
 Recorders without a magnetometer and barometer write IMU records (`01`); those with them write long
-IMU records (`04`).
+IMU records (`04`). MOKUKU II writes long GPS records (`05`).
 
 | Type | Offset | Field |
 |---|---:|---|
@@ -50,6 +51,10 @@ IMU records (`04`).
 | Long IMU | 47–50 | Temperature |
 | Long IMU | 51–54 | Pressure |
 | Long IMU | 55–56 | CRC-16 |
+| Long GPS | 11–39 | as in GPS |
+| Long GPS | 40–43 | HDOP |
+| Long GPS | 44–47 | Course |
+| Long GPS | 48–49 | CRC-16 |
 
 ## CRC-16
 
@@ -70,4 +75,5 @@ little-endian.
 does not match. On a bad sync, unknown type, CRC mismatch or truncated tail it advances one byte and
 searches for the next `A5 5A`, counting the CRC mismatches and skipped bytes. Timestamps become
 nanoseconds, wheel speed m/s; speed `255` is dropped. A long IMU record fills
-`sensor::ImuData::magnetic_field_mgauss` and adds a `sensor::BarometerData` (temperature, pressure).
+`sensor::ImuData::magnetic_field_mgauss` and adds a `sensor::BarometerData` (temperature, pressure);
+a long GPS record fills `sensor::GpsData::hdop` and `course_deg`.
