@@ -9,7 +9,11 @@
 #include <optional>
 
 #include <gtest/gtest.h>
+
+#include <Eigen/Dense>
+
 #include "common/math/geodesy.h"
+#include "sophus/so3.hpp"
 
 namespace mapmind::fusion {
 namespace {
@@ -43,16 +47,21 @@ Sophus::SO3d VehicleFromBody() {
   return Sophus::SO3d::rotX(1.1) * Sophus::SO3d::rotZ(0.4) * Sophus::SO3d::rotY(0.2);
 }
 
-// Geodetic position of a UTM offset from `origin`, by inverting the GeodeticToUtm Jacobian
+Eigen::Vector3d Utm(const Eigen::Vector3d& geodetic, int zone) {
+  Eigen::Vector3d utm;
+  geodetic_to_utm(geodetic.data(), zone, utm.data());
+  return utm;
+}
+
+// Geodetic position of a UTM offset from `origin`, by inverting the geodetic_to_utm Jacobian
 // (mm-level over the test's few hundred metres).
 Eigen::Vector3d UtmOffsetToGeodetic(const Eigen::Vector3d& offset, const Eigen::Vector3d& origin,
                                     int zone) {
   constexpr double kStep = 1e-4;
-  const Eigen::Vector3d origin_utm = math::GeodeticToUtm(origin, zone);
+  const Eigen::Vector3d origin_utm = Utm(origin, zone);
   Eigen::Matrix3d jacobian;
   for (int i = 0; i < 3; ++i) {
-    jacobian.col(i) =
-        (math::GeodeticToUtm(origin + kStep * Eigen::Vector3d::Unit(i), zone) - origin_utm) / kStep;
+    jacobian.col(i) = (Utm(origin + kStep * Eigen::Vector3d::Unit(i), zone) - origin_utm) / kStep;
   }
   return origin + jacobian.inverse() * offset;
 }
@@ -66,8 +75,9 @@ struct Simulation {
   // errors count from this time on
   double settled_s = kSettledSeconds;
   InsFusionOptions options = [] {
-    InsFusionOptions options;
-    options.forward = VehicleFromBody().inverse() * Eigen::Vector3d::UnitX();
+    InsFusionOptions options = ins_fusion_default_options();
+    Eigen::Map<Eigen::Vector3d>(options.forward) =
+        VehicleFromBody().inverse() * Eigen::Vector3d::UnitX();
     return options;
   }();
   // Returns the GPS position error (UTM, m) at `t`, or nullopt to drop the fix.
@@ -82,7 +92,8 @@ struct Errors {
   int pose_count = 0;
   // times the filter fell back from initialized to the start from two fixes
   int rearm_count = 0;
-  std::optional<int> utm_zone;
+  // 0 if never set
+  int zone = 0;
   // after Simulation::settled_s, in [error_from_s, error_to_s)
   double max_position = 0.0;
   double max_height = 0.0;
@@ -95,11 +106,12 @@ Errors Simulate(const Simulation& simulation, double error_from_s, double error_
       vehicle_from_body.inverse() * Eigen::Vector3d(0, 0, simulation.gyroscope_bias);
   // the simulated world frame is the UTM grid, offset to the first fix
   const Eigen::Vector3d origin(22.787839, 113.5210145, 13.0);
-  const int zone = math::UtmZone(origin.y());
-  const Eigen::Vector3d origin_utm = math::GeodeticToUtm(origin, zone);
+  const int zone = utm_zone(origin.y());
+  const Eigen::Vector3d origin_utm = Utm(origin, zone);
   const Eigen::Vector3d gravity_world(0.0, 0.0, -kGravity);
 
-  InsFusion fusion(simulation.options);
+  InsFusion fusion;
+  ins_fusion_init(&fusion, &simulation.options);
   Errors errors;
   bool was_initialized = false;
   double yaw = 0.7;
@@ -130,46 +142,52 @@ Errors Simulate(const Simulation& simulation, double error_from_s, double error_
     if (i % kGpsEvery == 0) {
       if (const std::optional<Eigen::Vector3d> error = simulation.gps_error(t)) {
         const Eigen::Vector3d geodetic = UtmOffsetToGeodetic(position + *error, origin, zone);
-        fusion.AddGps({timestamp_ns, 0, geodetic.x(), geodetic.y(), geodetic.z(), motion.speed,
-                       simulation.satellite_count});
+        const InsFusionGps fix = {timestamp_ns, geodetic.x(), geodetic.y(), geodetic.z(),
+                                  simulation.satellite_count};
+        ins_fusion_add_gps(&fusion, &fix, nullptr);
       }
     }
     if (i % kWheelEvery == 0) {
-      fusion.AddWheelSpeed({timestamp_ns, motion.speed});
+      ins_fusion_add_wheel_speed(&fusion, timestamp_ns, motion.speed);
     }
     const bool imu_dropped = simulation.imu_dropped(t);
     if (!imu_dropped) {
-      fusion.AddImu(
-          {timestamp_ns, world_from_body.inverse() * (acceleration_world - gravity_world),
-           world_from_body.inverse() * Eigen::Vector3d(0, 0, motion.yaw_rate) + gyroscope_bias});
+      const Eigen::Vector3d acceleration =
+          world_from_body.inverse() * (acceleration_world - gravity_world);
+      const Eigen::Vector3d angular_velocity =
+          world_from_body.inverse() * Eigen::Vector3d(0, 0, motion.yaw_rate) + gyroscope_bias;
+      ins_fusion_add_imu(&fusion, timestamp_ns, acceleration.data(), angular_velocity.data());
     }
 
-    if (was_initialized && !fusion.initialized()) {
+    if (was_initialized && !fusion.initialized) {
       ++errors.rearm_count;
     }
-    was_initialized = fusion.initialized();
+    was_initialized = fusion.initialized;
     // a pose is output per IMU sample
-    if (!fusion.initialized() || imu_dropped) {
+    if (!fusion.initialized || imu_dropped) {
       continue;
     }
     ++errors.pose_count;
     if (t < simulation.settled_s || t < error_from_s || t >= error_to_s) {
       continue;
     }
-    const Sophus::SE3d pose = fusion.pose();
-    const Eigen::Vector3d position_error = pose.translation() - origin_utm - position;
+    Eigen::Vector3d pose_position;
+    double q[4];  // w x y z
+    ins_fusion_pose(&fusion, pose_position.data(), q);
+    const Sophus::SO3d pose_rotation(Eigen::Quaterniond(q[0], q[1], q[2], q[3]));
+    const Eigen::Vector3d position_error = pose_position - origin_utm - position;
     errors.max_position = std::max(errors.max_position, position_error.norm());
     errors.max_height = std::max(errors.max_height, std::abs(position_error.z()));
     errors.max_rotation =
-        std::max(errors.max_rotation, (pose.so3().inverse() * world_from_body).log().norm());
+        std::max(errors.max_rotation, (pose_rotation.inverse() * world_from_body).log().norm());
   }
-  errors.utm_zone = fusion.utm_zone();
+  errors.zone = fusion.utm_zone;
   return errors;
 }
 
 TEST(InsFusion, TracksSimulatedRide) {
   const Errors errors = Simulate(Simulation{}, 0.0, 40.0);
-  EXPECT_EQ(errors.utm_zone, math::UtmZone(113.5210145));
+  EXPECT_EQ(errors.zone, utm_zone(113.5210145));
   EXPECT_GT(errors.pose_count, 20 * 100);
   EXPECT_LT(errors.max_position, 0.5);
   // The gyroscope bias (starting at zero) is learnt from GPS only, slowly in a steady turn.

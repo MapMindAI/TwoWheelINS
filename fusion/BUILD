@@ -6,7 +6,10 @@ cc_library(
     name = "kfcore_ins",
     srcs = ["kfcore_ins.c"],
     hdrs = ["kfcore_ins.h"],
-    deps = ["//third_party/kfcore"],
+    deps = [
+        "//common/math:quaternion",
+        "//third_party/kfcore",
+    ],
 )
 
 cc_test(
@@ -22,16 +25,13 @@ cc_test(
 
 cc_library(
     name = "ins_fusion",
-    srcs = ["ins_fusion.cc"],
+    srcs = ["ins_fusion.c"],
     hdrs = ["ins_fusion.h"],
     deps = [
         ":kfcore_ins",
         "//common/math:geodesy",
-        "//common/sensor:gps_data",
-        "//common/sensor:imu_data",
-        "//common/sensor:wheel_speed_data",
-        "@eigen",
-        "@sophus",
+        "//common/math:quaternion",
+        "//common/sensor:gps_accuracy",
     ],
 )
 
@@ -43,6 +43,7 @@ cc_binary(
         "//common/math:geodesy",
         "//common/reader:binary_record_reader",
         "//common/reader:txt_record_reader",
+        "@eigen",
         "@gflags",
     ],
 )
@@ -53,7 +54,9 @@ cc_test(
     deps = [
         ":ins_fusion",
         "//common/math:geodesy",
+        "@eigen",
         "@googletest//:gtest_main",
+        "@sophus",
     ],
 )
 
@@ -65,6 +68,7 @@ cc_binary(
         "//common/math:geodesy",
         "//common/reader:benchmark_dataset_reader",
         "//common/simulation:gps_noise",
+        "@eigen",
         "@gflags",
     ],
 )

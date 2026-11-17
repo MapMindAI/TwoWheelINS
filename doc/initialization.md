@@ -1,6 +1,6 @@
 # InsFusion initialization
 
-How `fusion/InsFusion` gets from the first IMU sample to a running filter (`fusion/ins_fusion.cc`).
+How `fusion/ins_fusion` gets from the first IMU sample to a running filter (`fusion/ins_fusion.c`).
 The filter state is position, velocity, attitude and the accelerometer and gyroscope biases
 (`KfcoreIns`); the world frame is UTM east-north-up, relative to the first usable GPS fix.
 
@@ -23,8 +23,8 @@ IMU 0-1 s ──► levelling ──► first GPS fix ──► second GPS fix: 
 A fix is usable with ≥ 4 satellites and when it is not a repeat of the previous fix.
 
 - At the first usable fix after levelling, its position and horizontal variance
-  (`sensor::GpsCovariance`) are kept, and the integral `F` of the forward direction
-  (`InsFusionOptions::forward`, IMU frame) starts: `F += R · forward dt`, with the levelled
+  (`gps_position_std`) are kept, and the integral `F` of the forward direction
+  (`InsFusionOptions.forward`, IMU frame) starts: `F += R · forward dt`, with the levelled
   attitude `R ← R · exp((ω − b_g) dt)`.
 - At the second, the filter starts. The yaw turns the heading of `F` onto the course of the step
   `s = p_2 − p_1`:
@@ -42,7 +42,7 @@ With `σ_s = sqrt(σ_1² + σ_2²)` the horizontal noise of the step and `dt` it
 
 | State | Initial value | Initial std |
 |---|---|---|
-| position | the second fix | `GpsCovariance` of that fix |
+| position | the second fix | `gps_position_std` of that fix |
 | velocity | `s / dt` (vertical 0) | `σ_s / dt`, at least 1 m/s |
 | roll, pitch | from levelling, propagated by the gyroscope | 0.05 rad |
 | yaw | `Rz(yaw) · R` | `σ_s / |s|`, clamped to [0.05, π] rad |

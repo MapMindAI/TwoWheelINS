@@ -7,6 +7,7 @@
 #include <random>
 
 #include "common/math/geodesy.h"
+#include "common/sensor/gps_accuracy.h"
 
 namespace mapmind::simulation {
 
@@ -17,8 +18,7 @@ constexpr int kMinSatellites = 4;
 
 int SatelliteCount(double horizontal_error) {
   int count = kMaxSatellites;
-  while (count > kMinSatellites &&
-         std::sqrt(sensor::GpsCovariance(count)(0, 0)) < horizontal_error) {
+  while (count > kMinSatellites && gps_position_std(count).horizontal < horizontal_error) {
     --count;
   }
   return count;
@@ -29,8 +29,9 @@ int SatelliteCount(double horizontal_error) {
 std::vector<sensor::GpsData> AddGpsNoise(const std::vector<reader::GpsPosition>& gps,
                                          const Eigen::Vector3d& origin,
                                          const GpsNoiseOptions& options, uint32_t seed) {
-  const int zone = math::UtmZone(origin.y());
-  const Eigen::Vector3d origin_utm = math::GeodeticToUtm(origin, zone);
+  const int zone = utm_zone(origin.y());
+  Eigen::Vector3d origin_utm;
+  geodetic_to_utm(origin.data(), zone, origin_utm.data());
   const Eigen::Vector3d walk(options.horizontal_walk, options.horizontal_walk,
                              options.vertical_walk);
   const Eigen::Vector3d white_std(options.horizontal_white_std, options.horizontal_white_std,
@@ -57,9 +58,10 @@ std::vector<sensor::GpsData> AddGpsNoise(const std::vector<reader::GpsPosition>&
         drift *= std::exp(-dt / options.recovery_s);
       }
     }
-    const Eigen::Vector3d geodetic = math::UtmToGeodetic(
-        origin_utm + gps[i].position + drift + white_std.cwiseProduct(draw()), zone,
-        /*southern=*/false);
+    const Eigen::Vector3d utm =
+        origin_utm + gps[i].position + drift + white_std.cwiseProduct(draw());
+    Eigen::Vector3d geodetic;
+    utm_to_geodetic(utm.data(), zone, /*southern=*/false, geodetic.data());
     noisy.push_back({gps[i].timestamp_ns, 0, geodetic.x(), geodetic.y(), geodetic.z(), 0.0,
                      SatelliteCount(drift.head<2>().norm())});
   }

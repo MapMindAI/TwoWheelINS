@@ -173,6 +173,9 @@ TEST(KfcoreIns, UpdatesLikeDenseFilter) {
 
   ASSERT_TRUE(Update<3>(&filter, residual, jacobian, variance));
   ExpectCovarianceNear(CovarianceOf(filter), expected);
+  for (int i = 0; i < kStateSize; ++i) {
+    EXPECT_DOUBLE_EQ(kfcore_ins_variance(&filter, i), CovarianceOf(filter)(i, i));
+  }
   EXPECT_TRUE((Position(filter) - position).isApprox(error.segment<3>(KFCORE_INS_POSITION), 1e-4));
   EXPECT_TRUE((Velocity(filter) - velocity).isApprox(error.segment<3>(KFCORE_INS_VELOCITY), 1e-4));
   EXPECT_TRUE((Rotation(filter) * rotation.inverse())

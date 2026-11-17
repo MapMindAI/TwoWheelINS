@@ -3,9 +3,9 @@
 
 #include "fusion/kfcore_ins.h"
 
-#include <math.h>
 #include <string.h>
 
+#include "common/math/quaternion.h"
 #include "third_party/kfcore/kalman_udu.h"
 
 enum {
@@ -18,60 +18,6 @@ enum {
 // A period that is due within this fraction still predicts, so IMU timestamp jitter cannot halve
 // the prediction rate.
 static const double kCovariancePeriodTolerance = 0.01;
-
-// result = a * b; quaternions (w, x, y, z). `result` may alias neither input.
-static void QuaternionMultiply(const double a[4], const double b[4], double result[4]) {
-  result[0] = a[0] * b[0] - a[1] * b[1] - a[2] * b[2] - a[3] * b[3];
-  result[1] = a[0] * b[1] + a[1] * b[0] + a[2] * b[3] - a[3] * b[2];
-  result[2] = a[0] * b[2] - a[1] * b[3] + a[2] * b[0] + a[3] * b[1];
-  result[3] = a[0] * b[3] + a[1] * b[2] - a[2] * b[1] + a[3] * b[0];
-}
-
-// Unit quaternion of the rotation vector `v` (rad), with Sophus's series near zero.
-static void QuaternionExp(const double v[3], double result[4]) {
-  const double theta_sq = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
-  double real;
-  double imaginary;
-  if (theta_sq * theta_sq < 1e-30) {
-    real = 1.0 - theta_sq / 8.0 + theta_sq * theta_sq / 384.0;
-    imaginary = 0.5 - theta_sq / 48.0 + theta_sq * theta_sq / 3840.0;
-  } else {
-    const double theta = sqrt(theta_sq);
-    real = cos(0.5 * theta);
-    imaginary = sin(0.5 * theta) / theta;
-  }
-  result[0] = real;
-  for (int i = 0; i < 3; ++i) {
-    result[i + 1] = imaginary * v[i];
-  }
-}
-
-static void QuaternionNormalize(double q[4]) {
-  const double norm = sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
-  for (int i = 0; i < 4; ++i) {
-    q[i] /= norm;
-  }
-}
-
-// Row-major rotation matrix of the unit quaternion `q` (w, x, y, z).
-static void QuaternionToMatrix(const double q[4], double m[9]) {
-  const double w = q[0], x = q[1], y = q[2], z = q[3];
-  m[0] = 1.0 - 2.0 * (y * y + z * z);
-  m[1] = 2.0 * (x * y - w * z);
-  m[2] = 2.0 * (x * z + w * y);
-  m[3] = 2.0 * (x * y + w * z);
-  m[4] = 1.0 - 2.0 * (x * x + z * z);
-  m[5] = 2.0 * (y * z - w * x);
-  m[6] = 2.0 * (x * z - w * y);
-  m[7] = 2.0 * (y * z + w * x);
-  m[8] = 1.0 - 2.0 * (x * x + y * y);
-}
-
-static void MatrixVector(const double m[9], const double v[3], double result[3]) {
-  for (int i = 0; i < 3; ++i) {
-    result[i] = m[3 * i] * v[0] + m[3 * i + 1] * v[1] + m[3 * i + 2] * v[2];
-  }
-}
 
 // Writes the row-major 3x3 `block` * scale at (row, column) of a column-major matrix with
 // `rows` rows.
@@ -159,13 +105,13 @@ void kfcore_ins_predict(KfcoreIns* ins, const double acceleration[3],
     return;
   }
   double rotation[9];
-  QuaternionToMatrix(ins->rotation, rotation);
+  quaternion_to_matrix(ins->rotation, rotation);
   double specific_force[3];
   for (int i = 0; i < 3; ++i) {
     specific_force[i] = acceleration[i] - ins->accelerometer_bias[i];
   }
   double specific_force_world[3];
-  MatrixVector(rotation, specific_force, specific_force_world);
+  quaternion_rotate(ins->rotation, specific_force, specific_force_world);
 
   ins->pending_covariance_dt += dt;
   if (ins->pending_covariance_dt >= (1.0 - kCovariancePeriodTolerance) * ins->covariance_period) {
@@ -183,11 +129,9 @@ void kfcore_ins_predict(KfcoreIns* ins, const double acceleration[3],
     rotation_vector[i] = (angular_velocity[i] - ins->gyroscope_bias[i]) * dt;
   }
   double step[4];
-  QuaternionExp(rotation_vector, step);
-  const double previous_rotation[4] = {ins->rotation[0], ins->rotation[1], ins->rotation[2],
-                                       ins->rotation[3]};
-  QuaternionMultiply(previous_rotation, step, ins->rotation);
-  QuaternionNormalize(ins->rotation);
+  quaternion_exp(rotation_vector, step);
+  quaternion_multiply(ins->rotation, step, ins->rotation);
+  quaternion_normalize(ins->rotation);
 }
 
 static void Correct(KfcoreIns* ins, const float error[kStateSize]) {
@@ -200,11 +144,9 @@ static void Correct(KfcoreIns* ins, const float error[kStateSize]) {
     ins->accelerometer_bias[i] += error[KFCORE_INS_ACCELEROMETER_BIAS + i];
     ins->gyroscope_bias[i] += error[KFCORE_INS_GYROSCOPE_BIAS + i];
   }
-  QuaternionExp(attitude_error, correction);
-  const double previous_rotation[4] = {ins->rotation[0], ins->rotation[1], ins->rotation[2],
-                                       ins->rotation[3]};
-  QuaternionMultiply(correction, previous_rotation, ins->rotation);
-  QuaternionNormalize(ins->rotation);
+  quaternion_exp(attitude_error, correction);
+  quaternion_multiply(correction, ins->rotation, ins->rotation);
+  quaternion_normalize(ins->rotation);
 }
 
 bool kfcore_ins_update(KfcoreIns* ins, const double* residual, const double* jacobian,
@@ -229,6 +171,15 @@ bool kfcore_ins_update(KfcoreIns* ins, const double* residual, const double* jac
                                 /*downweight_outlier=*/0);
   Correct(ins, error);
   return status == 0;
+}
+
+double kfcore_ins_variance(const KfcoreIns* ins, int index) {
+  double sum = 0.0;
+  for (int k = 0; k < kStateSize; ++k) {
+    const double u = ins->u[index + k * kStateSize];
+    sum += u * u * ins->d[k];
+  }
+  return sum;
 }
 
 void kfcore_ins_covariance(const KfcoreIns* ins, double* covariance) {

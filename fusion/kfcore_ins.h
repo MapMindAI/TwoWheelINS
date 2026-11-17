@@ -80,6 +80,9 @@ void kfcore_ins_predict(KfcoreIns* ins, const double acceleration[3],
 bool kfcore_ins_update(KfcoreIns* ins, const double* residual, const double* jacobian,
                        const double* variance, int rows);
 
+// Error variance of state `index` (the covariance diagonal).
+double kfcore_ins_variance(const KfcoreIns* ins, int index);
+
 // Error covariance U diag(d) U^T, KFCORE_INS_STATE_SIZE^2 values (symmetric).
 void kfcore_ins_covariance(const KfcoreIns* ins, double* covariance);
 

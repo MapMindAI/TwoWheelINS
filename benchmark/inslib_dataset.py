@@ -11,8 +11,8 @@ INSLIB expects the IMU in an FRD body frame (x forward, y right, z down). The da
 into one built from its forward.txt (the walking direction in the IMU frame) and the mean specific
 force over the run (up): down = -up, forward = forward.txt without its down component, right =
 down x forward. With that forward axis, automotive mode (yaw from the GNSS course over ground,
-from 0.5 m/s) gives the heading. INSLIB also gets the noisy GPS positions with the GpsCovariance
-std of their satellite count, a velocity from the step since the previous fix (the simulated
+from 0.5 m/s) gives the heading. INSLIB also gets the noisy GPS positions with the gps_position_std
+of their satellite count, a velocity from the step since the previous fix (the simulated
 receiver reports none) with the matching covariance, InsFusion's IMU noise densities, and no
 magnetometer. Its FRD attitude is turned back into the IMU frame for the output. ref.csv is the
 ground truth (FRD attitude), so replay.py also scores it.
@@ -32,7 +32,7 @@ from ins_benchmark import (NED_FROM_ENU, geodetic_to_utm, gps_quality, gps_std, 
 # run_dataset_main's kOrigin: world x, y, z are UTM easting, northing, altitude offsets from it
 ORIGIN = (22.787839, 113.5210145, 13.0)
 ZONE = 49
-# InsFusion's kProcessNoise (fusion/ins_fusion.cc) as densities
+# InsFusion's kProcessNoise (fusion/ins_fusion.c) as densities
 GYR_PSD = 0.01 ** 2  # (rad/s)^2/Hz
 ACC_PSD = 0.2 ** 2  # (m/s^2)^2/Hz
 GYR_BIAS_RW = 2e-4  # rad/s/sqrt(s)
@@ -55,7 +55,7 @@ imu:
 gnss:
   leverarm_frd: [0, 0, 0]
   delay_ms: 0
-  # GpsCovariance reaches 7.5 m / 50 m at 4 satellites; a velocity from two such fixes 1 s apart
+  # gps_position_std reaches 7.5 m / 50 m at 4 satellites; a velocity from two such fixes 1 s apart
   # has sqrt(2) times that
   max_horizontal_pos_stddev_m: 8.0
   max_vertical_pos_stddev_m: 60.0

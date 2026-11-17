@@ -9,7 +9,7 @@ library first.
 
 Both get the same input as ins_fusion_main: IMU samples cleaned like RemoveCorruptImuSamples, GPS
 fixes with >= 4 satellites that do not repeat the previous one, and the GPS covariance of
-GpsCovariance (common/sensor/gps_data.cc). The IMU is rotated into a vehicle front-right-down (FRD)
+gps_position_std (common/sensor/gps_accuracy.c). The IMU is rotated into a vehicle front-right-down (FRD)
 frame: down from the mean specific force, forward from fitting the horizontal specific force to the
 GPS along-track acceleration, turned by --mount-yaw-deg.
 
@@ -71,7 +71,7 @@ def clean_imu(imu):
 
 
 def usable_gps(gps):
-    """Fixes with >= 4 satellites not repeating the previous usable one (InsFusion::IsUsable)."""
+    """Fixes with >= 4 satellites not repeating the previous usable one (IsUsable in fusion/ins_fusion.c)."""
     out, last = [], None
     for fix in gps:
         if fix[6] < 4:
@@ -89,7 +89,7 @@ def gps_quality(satellites):
 
 
 def gps_std(satellites):
-    """(horizontal, vertical) std in m; same rule as GpsCovariance in common/sensor/gps_data.cc."""
+    """(horizontal, vertical) std in m; same rule as gps_position_std in common/sensor/gps_accuracy.c."""
     n = np.asarray(satellites, float)
     redundancy = np.maximum(n - 3, 1)
     horizontal = np.where(n > 20, 0.05, np.where(n > 10, 0.5, 7.5 / redundancy))
@@ -333,7 +333,7 @@ imu:
 gnss:
   leverarm_frd: [0, 0, 0]
   delay_ms: 0
-  # GpsCovariance reaches 7.5 m / 50 m at 4 satellites; GNSS velocity is 1 m/s
+  # gps_position_std reaches 7.5 m / 50 m at 4 satellites; GNSS velocity is 1 m/s
   max_horizontal_pos_stddev_m: 8.0
   max_vertical_pos_stddev_m: 60.0
   max_horizontal_vel_stddev_mps: 3.0

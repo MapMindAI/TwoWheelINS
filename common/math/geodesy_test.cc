@@ -5,15 +5,17 @@
 
 #include <gtest/gtest.h>
 
+#include <Eigen/Core>
+
 namespace mapmind::math {
 namespace {
 
 TEST(Geodesy, UtmZone) {
-  EXPECT_EQ(UtmZone(-180.0), 1);
-  EXPECT_EQ(UtmZone(0.0), 31);
-  EXPECT_EQ(UtmZone(113.5210145), 49);
-  EXPECT_EQ(UtmZone(179.999), 60);
-  EXPECT_EQ(UtmZone(180.0), 1);
+  EXPECT_EQ(utm_zone(-180.0), 1);
+  EXPECT_EQ(utm_zone(0.0), 31);
+  EXPECT_EQ(utm_zone(113.5210145), 49);
+  EXPECT_EQ(utm_zone(179.999), 60);
+  EXPECT_EQ(utm_zone(180.0), 1);
 }
 
 // Reference values from PROJ (pyproj, EPSG:326xx / 327xx).
@@ -32,7 +34,8 @@ TEST(Geodesy, GeodeticToUtmMatchesProj) {
       {{60.0, 10.0, 0.0}, 32, {555776.2668, 6651832.7354, 0.0}},
   };
   for (const Case& c : cases) {
-    const Eigen::Vector3d utm = GeodeticToUtm(c.geodetic, c.zone);
+    Eigen::Vector3d utm;
+    geodetic_to_utm(c.geodetic.data(), c.zone, utm.data());
     EXPECT_NEAR(utm.x(), c.utm.x(), 1e-3) << c.geodetic.transpose();
     EXPECT_NEAR(utm.y(), c.utm.y(), 1e-3) << c.geodetic.transpose();
     EXPECT_DOUBLE_EQ(utm.z(), c.utm.z());
@@ -47,9 +50,11 @@ TEST(Geodesy, UtmToGeodeticInvertsGeodeticToUtm) {
                                    {60.0, 10.0, 0.0},
                                    {78.0, 15.0, 0.0}};
   for (const Eigen::Vector3d& geodetic : cases) {
-    const int zone = UtmZone(geodetic.y());
-    const Eigen::Vector3d utm = GeodeticToUtm(geodetic, zone);
-    const Eigen::Vector3d inverse = UtmToGeodetic(utm, zone, geodetic.x() < 0.0);
+    const int zone = utm_zone(geodetic.y());
+    Eigen::Vector3d utm;
+    geodetic_to_utm(geodetic.data(), zone, utm.data());
+    Eigen::Vector3d inverse;
+    utm_to_geodetic(utm.data(), zone, geodetic.x() < 0.0, inverse.data());
     // 1e-8 deg is about 1 mm; the third-order series leaves up to 0.6 mm in latitude
     EXPECT_NEAR(inverse.x(), geodetic.x(), 1e-8) << geodetic.transpose();
     EXPECT_NEAR(inverse.y(), geodetic.y(), 1e-8) << geodetic.transpose();
